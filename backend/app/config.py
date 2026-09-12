@@ -1,0 +1,254 @@
+"""Typed application configuration loaded from environment variables.
+
+Service credentials are optional at boot so the server can start while they are
+being filled in; each service raises a clear error when first used without its
+required configuration (see `require`).
+"""
+
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Project owners — always granted the top-tier Creator role (Super Admin + the
+# ability to manage secrets/integrations from the UI), regardless of any env
+# config. These are the people who built and own the panel/project.
+CREATOR_EMAILS_DEFAULT: frozenset[str] = frozenset(
+    {
+        "vishal.tiwari@legalsoft.com",
+        "vishaltiwari230996@gmail.com",
+    }
+)
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    # Server
+    # Defaults to production so an unset APP_ENV fails *secure*: the catch-all
+    # handler in app.main only echoes raw exception text (file paths, Firestore
+    # doc ids, provider error bodies) when this is explicitly "development".
+    # Local dev opts in via APP_ENV=development in .env.
+    app_env: str = "production"
+    port: int = 8080
+    # Comma-separated list of allowed browser origins (the Vercel frontend).
+    cors_origins: str = "http://localhost:3000,http://localhost:3001,http://localhost:8000"
+
+    # Auth
+    jwt_secret: str = ""
+    jwt_expires_minutes: int = 60 * 24 * 7
+    # Local-dev sign-in (added by this standalone extract; not in the parent
+    # repo). Google sign-in needs a Web Client ID *and* a reachable Firestore
+    # to upsert the user into — neither of which a laptop running this extract
+    # offline has, so there would be no way past the login screen at all.
+    #
+    # POST /api/auth/dev mints a token directly. It is refused unless this is
+    # true AND ``app_env`` is exactly "development", so the two switches must
+    # both be thrown deliberately; a production deployment (where ``app_env``
+    # defaults to "production") cannot reach it even if this is set by
+    # accident. It does NOT bypass the sign-in allowlist — see
+    # ``routers.auth.dev_login``.
+    local_dev_auth: bool = False
+    # Google OAuth (Identity Services). The Web Client ID is used both in the
+    # frontend button and as the audience when verifying ID tokens here.
+    google_client_id: str = ""
+    # Comma-separated emails granted Super Admin (analytics + user directory).
+    admin_emails: str = ""
+    # Comma-separated emails granted the Creator role (Super Admin + secrets /
+    # integration management). The CREATOR_EMAILS_DEFAULT owners are always
+    # Creators even when this is empty.
+    creator_emails: str = ""
+    # Comma-separated emails granted the GEO editor role: the eight
+    # registry-shaping GEO routes (prompts, personas, brand config, rescan,
+    # strategy generation) and nothing else.
+    #
+    # This is the first per-agent role in the service, and it exists because
+    # the alternative was worse. Six people need to administer the GEO agent;
+    # the only elevated role was Creator, which also unlocks Settings →
+    # Secrets, the admin database viewer, model config and every other agent.
+    # Granting eight people that to let them edit prompt universes would have
+    # been a far larger permission change than this one.
+    #
+    # Creators are GEO editors implicitly (see ``security.is_geo_editor``), so
+    # they are not repeated here. Emptying this leaves GEO editing exactly
+    # where it was before the role existed: Creator-only.
+    geo_editor_emails: str = (
+        "nino.b@legalsoft.com,"
+        "marian.p@legalsoft.com,"
+        "mahmoud.e@legalsoft.com,"
+        "michael.tayco@legalsoft.com,"
+        "lynie.t@aivirtual.com,"
+        "miguel@usimmigration.ai,"
+        "yans.suarez@medvirtual.ai,"
+        "franceska@aianswering.ai"
+    )
+
+    # --- Sign-in allowlist -------------------------------------------------
+    # Cloud Run runs --allow-unauthenticated, so /api/auth/google is the ONLY
+    # thing standing between the public internet and every endpoint (and the
+    # platform's LLM billing). A verified Google account may sign in only when
+    # its domain is listed here or its full address is in `allowed_emails`.
+    # Comma-separated; subdomains are NOT implied (list them explicitly).
+    allowed_email_domains: str = "lawpreptutorial.com"
+    # Comma-separated individual addresses allowed regardless of domain — the
+    # exception list for contractors/clients. Fillable via env, no code change.
+    #
+    # The four entries below are the GEO editors on outside domains. They are
+    # listed ONE ADDRESS AT A TIME on purpose. Putting aivirtual.com,
+    # usimmigration.ai and medvirtual.ai into ``allowed_email_domains`` would
+    # have been four shorter lines and would have admitted every mailbox at
+    # four other companies — including ones nobody here provisions or
+    # de-provisions — to a service Cloud Run serves --allow-unauthenticated,
+    # where this list is the only door. Named addresses only.
+    allowed_emails: str = (
+        "lynie.t@aivirtual.com,"
+        "miguel@usimmigration.ai,"
+        "yans.suarez@medvirtual.ai,"
+        "franceska@aianswering.ai"
+    )
+
+    # OpenRouter (agent LLM + image generation)
+    openrouter_api_key: str = ""
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # Reasoning model — the agent's "brain" for piecing everything together:
+    # brand persona compilation, creative-type decision, and master-prompt
+    # synthesis. A top-tier model is important for faithfully preserving brand
+    # detail and making good art-direction calls.
+    openrouter_model: str = "anthropic/claude-opus-4.6"
+    # Fast/cheap model for trivial parsing (extracting aspect ratio/brief from
+    # chat, guessing the official website URL). Quality is not critical here.
+    openrouter_fast_model: str = "anthropic/claude-sonnet-4.5"
+    # Image-output model. Nano Banana Pro (Gemini 3 Pro Image) is the default
+    # because it accepts the real brand logo as a reference image AND follows the
+    # detailed brand master prompt — giving on-brand, logo-accurate creatives.
+    # Flux.2 (black-forest-labs/flux.2-pro|max) is excellent for pure backgrounds
+    # but is image-only (can't composite the real logo), so it's reserved for the
+    # future layered editor.
+    openrouter_image_model: str = "google/gemini-3-pro-image-preview"
+    # Optional alternative/background model toggle.
+    openrouter_image_model_hero: str = "black-forest-labs/flux.2-max"
+    # Vision-capable model used for OCR / reading uploaded images.
+    openrouter_vision_model: str = "openai/gpt-4o-mini"
+    # Stage-3 polish fan-out (Graphics Designer Text Optimizer). A PREMIUM
+    # image-EDIT model by default: collision fixes and text fidelity are decided
+    # here, so cost rises only where it pays. Stages 1-2 keep the cheaper
+    # ``openrouter_image_model``. Env var: GD_POLISH_IMAGE_MODEL.
+    gd_polish_image_model: str = "google/gemini-3-pro-image"
+    # Auto-mode planner (Graphics Designer): plans gradient/element/text/logo
+    # from the user's brief. Routed through OpenRouter like every model here.
+    gd_planner_model: str = "openai/gpt-5.6-sol"
+    # Sent as HTTP-Referer/X-Title to OpenRouter for attribution (optional).
+    app_public_url: str = "http://localhost:3000"
+    app_title: str = "AgentOS"
+
+    # GEO agent (a10) — direct engine keys for AI-answer polling. These bypass
+    # OpenRouter on purpose: citation metadata (Perplexity search_results,
+    # Gemini groundingMetadata, OpenAI url_citation) only comes from the
+    # providers' own APIs. All three are optional; each engine simply reports
+    # itself unavailable until its key exists (env or Settings → Secrets).
+    perplexity_api_key: str = ""
+    gemini_api_key: str = ""
+    openai_api_key: str = ""
+
+    # GEO agent (a10) — DataForSEO, the agent's only search provider: it serves
+    # both Google AI Overview and Google AI Mode (SerpAPI, removed 2026-09-04,
+    # had no AI Mode endpoint). One Basic-auth credential in two halves; the
+    # base64 of "login:password" is assembled at call time in geo_engines and
+    # never stored. Either half missing leaves both Google engines honestly off.
+    dataforseo_login: str = ""
+    dataforseo_password: str = ""
+
+    # Google Cloud
+    gcp_project_id: str = ""
+    google_application_credentials: str = ""
+    gcs_bucket_name: str = ""
+    # Firestore database id. Use "(default)" for the default database, or set
+    # the name of a custom database (e.g. "lsbrandkit").
+    firestore_database: str = "(default)"
+
+    # Canva Connect
+    canva_client_id: str = ""
+    canva_client_secret: str = ""
+    canva_redirect_uri: str = "http://localhost:8080/api/canva/callback"
+
+    # Ingestion source (the ONLY brand-asset directory the app reads).
+    brand_kits_dir: str = ""
+
+    # Brand Reference Library — the Google Drive folder (shared with the service
+    # account) the team drops on-brand reference creatives into. Synced into the
+    # library via POST /api/ref-library/sync-drive. Defaults to the Law Prep
+    # Tutorial
+    # "Context Files" folder; override with GD_DRIVE_FOLDER_ID.
+    gd_drive_folder_id: str = "1-Uc5z2Rx5TlA3lRFBxDHDIpslVl3r_pG"
+    # Brand all Drive-synced references are filed under (one-brand folder today).
+    gd_drive_brand_name: str = "Law Prep Tutorial"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def admin_email_set(self) -> set[str]:
+        return {e.strip().lower() for e in self.admin_emails.split(",") if e.strip()}
+
+    @property
+    def creator_email_set(self) -> set[str]:
+        env = {e.strip().lower() for e in self.creator_emails.split(",") if e.strip()}
+        return set(CREATOR_EMAILS_DEFAULT) | env
+
+    @property
+    def geo_editor_email_set(self) -> set[str]:
+        """Addresses granted the GEO editor role by config.
+
+        Parsed exactly like ``admin_email_set``. The Creator implication is NOT
+        folded in here — it belongs in ``security.is_geo_editor``, beside the
+        same implication for ``is_admin``, so there is one place that decides
+        who holds the role and one place to read when asking why.
+        """
+        return {e.strip().lower() for e in self.geo_editor_emails.split(",") if e.strip()}
+
+    @property
+    def allowed_email_domain_set(self) -> set[str]:
+        """Domains permitted to sign in. Empty set = nobody (fail closed)."""
+        return {
+            d.strip().lower().lstrip("@")
+            for d in self.allowed_email_domains.split(",")
+            if d.strip()
+        }
+
+    @property
+    def allowed_email_set(self) -> set[str]:
+        """Individual addresses permitted to sign in regardless of domain."""
+        return {e.strip().lower() for e in self.allowed_emails.split(",") if e.strip()}
+
+    def require(self, field: str) -> str:
+        """Return a config value, raising a descriptive error if it is empty."""
+        value = getattr(self, field, "")
+        if not value:
+            raise RuntimeError(
+                f'Missing required configuration "{field}". Set it in your .env '
+                f"(see credentials.md for how to obtain it)."
+            )
+        return str(value)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
+
+# Google's client libraries read GOOGLE_APPLICATION_CREDENTIALS from the OS
+# environment (not from .env), so export the configured path for local dev. On
+# Cloud Run the attached service account is used instead, so this is left unset.
+if settings.google_application_credentials and not os.environ.get(
+    "GOOGLE_APPLICATION_CREDENTIALS"
+):
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(
+        settings.google_application_credentials
+    )

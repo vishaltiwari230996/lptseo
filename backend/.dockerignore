@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+gcp-service-account.json
+deploy.env.yaml
+*.log
+.pytest_cache/

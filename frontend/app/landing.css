@@ -1,0 +1,335 @@
+/* Law Prep Tutorial — the signed-out landing page.
+ *
+ * Grounded in one idea: rank is the language this business already speaks. Law
+ * coaching sells All India Ranks, cut-offs and merit lists; search is ranks
+ * too. So the thing floating over the hero is a merit list resolving, and the
+ * page below it stays quiet.
+ *
+ * THE HERO IS A DRAWN GROWTH CURVE, not footage — see components/HeroMedia.tsx
+ * for why (short version: it is on subject, it is KB not MB, and it cannot
+ * stutter the way an encoded Ken Burns move does). Because it is drawn, its
+ * composition is known: ink ground, curve climbing to the lower right, bloom
+ * behind the peak. The scrim can therefore be light and left-weighted, rather
+ * than the near-opaque blanket that arbitrary footage would have needed.
+ *
+ * Type is Geist throughout — one grotesque, hierarchy on weight and tracking.
+ * The negative tracking on the large weights is doing most of the work here;
+ * a grotesque set loose at 60px reads cheap.
+ */
+
+.lp {
+  --lp-yellow: #ffe000;
+  --lp-ink: #03080a;
+  --lp-red: #d42a26;
+  --lp-red-deep: #b01f1c;
+
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+/* ---- Hero shell --------------------------------------------------------- */
+.lp-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: var(--lp-ink);
+  /* Tall enough to read as a video section, never taller than the viewport. */
+  min-height: min(82vh, 780px);
+  display: flex;
+  flex-direction: column;
+}
+
+.lp-media {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+}
+.lp-media canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+/* The contrast floor. Light, because the canvas already puts its dark end under
+   the headline — this only guarantees the floor rather than creating it. */
+.lp-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(95deg, #03080ac9 0%, #03080a8a 30%, #03080a29 62%, transparent 100%),
+    linear-gradient(to top, #03080a99 0%, transparent 38%);
+}
+
+/* ---- Top bar ------------------------------------------------------------ */
+.lp-top {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px clamp(20px, 5vw, 56px);
+}
+.lp-top__brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.lp-top__name {
+  font: 700 17px/1 var(--font-display);
+  letter-spacing: -0.02em;
+  color: #fcfcfe;
+  white-space: nowrap;
+}
+.lp-top__name em { font-style: normal; color: var(--lp-yellow); }
+
+.lp-signin {
+  font: 600 13.5px/1 var(--font-sans);
+  letter-spacing: -0.01em;
+  color: #fcfcfe;
+  background: #fcfcfe14;
+  border: 1px solid #fcfcfe38;
+  border-radius: 999px;
+  padding: 10px 20px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.lp-signin:hover { background: #fcfcfe29; border-color: #fcfcfe7a; }
+
+/* ---- Hero content ------------------------------------------------------- */
+.lp-hero__inner {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: clamp(28px, 4vw, 56px) clamp(20px, 5vw, 56px) clamp(48px, 6vw, 80px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  gap: clamp(32px, 5vw, 64px);
+  align-items: center;
+}
+.lp-hero__copy { min-width: 0; }
+
+.lp-hero h1 {
+  margin: 0 0 22px;
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: clamp(36px, 5.4vw, 64px);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  color: #fcfcfe;
+}
+.lp-hero h1 span { color: var(--lp-yellow); }
+
+.lp-hero__sub {
+  margin: 0 0 30px;
+  max-width: 46ch;
+  font: 450 16.5px/1.6 var(--font-sans);
+  letter-spacing: -0.005em;
+  color: #fcfcfec9;
+}
+
+.lp-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+
+.lp-cta {
+  font: 600 15px/1 var(--font-sans);
+  letter-spacing: -0.01em;
+  color: #fcfcfe;
+  background: var(--lp-red);
+  border: none;
+  border-radius: 999px;
+  padding: 16px 30px;
+  cursor: pointer;
+  box-shadow: 0 12px 28px -12px #d42a26cc;
+  transition: transform var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.lp-cta:hover { background: #e8352f; transform: translateY(-1px); }
+.lp-cta:active { transform: translateY(0); }
+
+.lp-hero__note {
+  margin: 20px 0 0;
+  font: 500 13px/1.5 var(--font-sans);
+  color: #fcfcfe70;
+}
+
+/* ---- The merit list ----------------------------------------------------- */
+/* Glass over the footage rather than a solid card: the motion behind it is the
+   point, so the panel should sit in the scene instead of punching a hole in it. */
+.lp-board {
+  background: #0b1013b8;
+  border: 1px solid #fcfcfe1f;
+  border-radius: 20px;
+  padding: clamp(18px, 2.4vw, 26px);
+  box-shadow: 0 40px 80px -40px #000000cc;
+  backdrop-filter: saturate(140%) blur(14px);
+  min-width: 0;
+}
+.lp-board__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 14px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #fcfcfe1f;
+}
+.lp-board__title {
+  font: 600 14px/1.2 var(--font-sans);
+  letter-spacing: -0.012em;
+  color: #fcfcfe;
+}
+.lp-board__meta {
+  font: 500 12px/1.2 var(--font-mono);
+  color: #fcfcfe70;
+  white-space: nowrap;
+}
+
+.lp-row {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px solid #fcfcfe12;
+}
+.lp-row:last-child { border-bottom: none; }
+
+/* Tabular so the digits do not jitter while the rank counts down, and tracked
+   in hard — big grotesque numerals need it or they look loose. */
+.lp-row__rank {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1;
+  font-weight: 650;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  text-align: right;
+  color: var(--lp-yellow);
+}
+.lp-row__q {
+  font: 500 14px/1.35 var(--font-sans);
+  letter-spacing: -0.008em;
+  color: #fcfcfee0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.lp-row__move {
+  font: 600 12.5px/1 var(--font-mono);
+  color: #6ee7a8;
+  white-space: nowrap;
+  opacity: 0;
+}
+.lp-row__move[data-shown="1"] { opacity: 1; transition: opacity 420ms var(--ease-out); }
+
+/* The one orchestrated moment: rows arrive from below, staggered, once. */
+.lp-row {
+  opacity: 0;
+  transform: translateY(14px);
+  animation: lp-rise 620ms var(--ease-out) forwards;
+  animation-delay: var(--lp-delay, 0ms);
+}
+@keyframes lp-rise {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ---- Capabilities ------------------------------------------------------- */
+.lp-what {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: clamp(56px, 8vw, 96px) clamp(20px, 5vw, 56px);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  gap: clamp(28px, 4vw, 52px);
+}
+.lp-what__item { min-width: 0; }
+.lp-what__item h2 {
+  margin: 0 0 10px;
+  font: 650 19px/1.25 var(--font-display);
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+}
+.lp-what__item p {
+  margin: 0;
+  max-width: 42ch;
+  font: 450 14.5px/1.65 var(--font-sans);
+  color: var(--text-secondary);
+}
+/* A short red keyline instead of a numbered marker: these three are a set, not
+   a sequence, so numbering them would claim an order that is not there. */
+.lp-what__item::before {
+  content: "";
+  display: block;
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--lp-red);
+  margin-bottom: 16px;
+}
+
+/* ---- Foot --------------------------------------------------------------- */
+.lp-foot {
+  margin-top: auto;
+  border-top: 1px solid var(--border-subtle);
+  padding: 22px clamp(20px, 5vw, 56px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  align-items: center;
+  justify-content: space-between;
+  font: 500 12.5px/1.5 var(--font-sans);
+  color: var(--text-tertiary);
+}
+
+/* ---- Sign-in layer ------------------------------------------------------ */
+.lp-authlayer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: #03080ab8;
+  backdrop-filter: blur(3px);
+  animation: lp-fade 180ms var(--ease-out);
+}
+@keyframes lp-fade { from { opacity: 0; } }
+.lp-authclose {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 61;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid #fcfcfe3d;
+  background: #03080a80;
+  color: #fcfcfe;
+  font: 500 18px/1 var(--font-sans);
+  cursor: pointer;
+}
+.lp-authclose:hover { background: #03080ab8; }
+
+/* ---- Narrow ------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .lp-hero { min-height: 0; }
+  .lp-hero__inner { grid-template-columns: minmax(0, 1fr); gap: 34px; }
+  .lp-row { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 12px; }
+  .lp-row__rank { font-size: 24px; }
+}
+
+/* Motion is decoration over a page that reads without it, so it is removed
+   rather than shortened. The rows must stay visible — the animation is what
+   sets their final opacity — and the canvas composes one static frame instead
+   of scrolling (see HeroMedia.tsx). */
+@media (prefers-reduced-motion: reduce) {
+  .lp-row { animation: none; opacity: 1; transform: none; }
+  .lp-row__move { transition: none; }
+  .lp-cta:hover { transform: none; }
+  .lp-authlayer { animation: none; }
+}

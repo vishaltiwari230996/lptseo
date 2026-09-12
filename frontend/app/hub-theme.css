@@ -1,0 +1,98 @@
+/* The console's dark theme, and the tokens the prototype never defined.
+ *
+ * `agenthub.css` is kept byte-for-byte as it came from the prototype, so both
+ * live here.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE DARK THEME IS NOT THE ONE THAT SHIPPED
+ * ---------------------------------------------------------------------------
+ * The prototype's dark theme is a cold slate — near-white text on near-black,
+ * measured at 13:1. That is a lot of light coming off a screen somebody reads
+ * for an hour, and it reads as harsh rather than as calm. It also leaves
+ * marigold — the console's only decorative colour — sitting on neutral grey,
+ * where it looks like a stray accent rather than a choice.
+ *
+ * This one is warm ink: the same paper-and-ink world as the light theme, at
+ * night. Body text sits at 10.0:1 — still comfortably past AAA (7:1), with
+ * about a third less glare — and the ground carries enough warmth that marigold
+ * belongs to it.
+ *
+ * Every pair is measured, not eyeballed: `.scratch/verify/build_theme.py`
+ * generated this block and refuses to emit a palette where any of them fails.
+ * The hardest is stated in the prototype's own CSS — `--fg-3` carries real
+ * content at 10-12px, so it has to clear 4.5:1 on all three surfaces.
+ *
+ * ---------------------------------------------------------------------------
+ * THE THREE TOKENS NOTHING EVER DEFINED
+ * ---------------------------------------------------------------------------
+ * `--ok`, `--surface-3` and `--mono` are used by `agenthub.css` and declared in
+ * neither theme, so every rule reading them was invalid at computed-value time
+ * and silently did nothing: the pace spine's "on pace" verdict took whatever
+ * colour it inherited, three blocks lost their background entirely, and six
+ * places asking for a monospace face got the body font. They are filled in for
+ * both themes below.
+ */
+
+:root {
+  /* used by agenthub.css, defined nowhere in it */
+  --ok: #17794F;
+  --surface-3: #EFEFEC;
+  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, monospace;
+}
+
+/* `:root[...]` rather than a bare `[...]`: the old console's `tokens/colors.css`
+ * declares its dark palette under `:root[data-theme="dark"]`, which outranks a
+ * bare attribute selector no matter the import order. That is why the
+ * prototype's own dark `--surface` never actually applied — it was losing to
+ * `#0b1013` on specificity, silently, in every dark screenshot. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --mono: ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Liberation Mono", Menlo, monospace;
+
+  /* ground */
+  --bg: #201E1B;
+  --surface: #262421;
+  --surface-2: #2D2A27;
+  --surface-3: #1A1816;
+
+  /* text */
+  --fg: #D0C8BB;
+  --fg-2: #A19B91;
+  --fg-3: #989289;
+
+  /* rules */
+  --rule: #383531;
+  --rule-soft: #2A2825;
+  --rule-hard: #4F4B46;
+
+  /* the rail */
+  --rail: #161412;
+  --rail-2: #262421;
+  --rail-line: #34312D;
+  --rail-fg: #A69F95;
+  --rail-fg-2: #847F77;
+
+  /* marigold — the one decorative colour */
+  --mark: #F0C651;
+  --mark-2: #6B5719;
+  --mark-ink: #2A1E02;
+  --mark-line: #6E5A1C;
+  --mark-row: #2B2519;
+
+  /* state */
+  --rival: #4E56A0;
+  --rival-ink: #E4E7FF;
+  --gap: #EE8A8F;
+  --gap-soft: #34211F;
+  --gap-swipe: #5E2B2B;
+  --gap-ink: #370C10;
+  --live: #5FC395;
+  --live-ink: #06281A;
+  --ok: #5FC395;
+  --proxy: #D6A855;
+
+  /* depth */
+  --shadow-lift: 0 10px 26px rgba(0, 0, 0, 0.46);
+  --shadow-float: 0 24px 60px rgba(0, 0, 0, 0.62);
+}

@@ -1,0 +1,54 @@
+/* Law Prep Tutorial — Typography tokens.
+   One family: Geist at every size, hierarchy carried on weight and tracking.
+   --font-display and --font-sans deliberately resolve to the SAME face; the two
+   names are kept because ~200 call sites use them, and they still mean two
+   different things (voice vs text) even when one family answers both. */
+:root {
+  /* ---- Families ---- */
+  --font-display: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans:    'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Lining, tabular figures for any numeric display (stats, leaderboards, data). */
+  --fvn-tabular: tabular-nums lining-nums;
+
+  /* ---- Weights (450 "book" is the OpenRouter body weight) ---- */
+  --fw-regular:  400; /* @kind font */
+  --fw-book:     450; /* @kind font */
+  --fw-medium:   500; /* @kind font */
+  --fw-semibold: 600; /* @kind font */
+  --fw-bold:     700; /* @kind font */
+  --fw-extrabold:700; /* @kind font */
+
+  /* ---- Type scale (OpenRouter role sizes; 12px floor) ---- */
+  --fs-display-2xl: 56px;   /* @kind font */
+  --fs-display-xl:  36px;   /* @kind font */
+  --fs-display-lg:  30px;   /* @kind font */
+  --fs-h1:          24px;   /* @kind font */
+  --fs-h2:          20px;   /* @kind font */
+  --fs-h3:          16px;   /* @kind font */
+  --fs-h4:          14px;   /* @kind font */
+  --fs-body-lg:     16px;   /* @kind font */
+  --fs-body:        14px;   /* @kind font */
+  --fs-body-sm:     13px;   /* @kind font */
+  --fs-caption:     12px;   /* @kind font */
+  --fs-overline:    12px;   /* @kind font */
+  --fs-mono:        13px;   /* @kind font */
+  /* line-heights */
+  --lh-display-2xl: 1.1; /* @kind other */ --lh-display-xl: 1.2; /* @kind other */ --lh-display-lg: 1.2; /* @kind other */
+  --lh-h1: 1.2; /* @kind other */ --lh-h2: 1.2; /* @kind other */ --lh-h3: 1.35; /* @kind other */ --lh-h4: 1.35; /* @kind other */
+  --lh-body-lg: 1.5; /* @kind other */ --lh-body: 1.625; /* @kind other */ --lh-body-sm: 1.5; /* @kind other */
+  --lh-caption: 1.4; /* @kind other */ --lh-overline: 1.3; /* @kind other */ --lh-mono: 1.5; /* @kind other */
+  /* letter-spacing */
+  --ls-display-2xl: -0.025em; /* @kind other */ --ls-display-xl: -0.025em; /* @kind other */ --ls-display-lg: -0.025em; /* @kind other */
+  --ls-h1: -0.025em; /* @kind other */ --ls-h2: -0.02em; /* @kind other */ --ls-h3: -0.01em; /* @kind other */ --ls-h4: 0; /* @kind other */
+  --ls-body: 0; /* @kind other */ --ls-caption: 0.005em; /* @kind other */ --ls-overline: 0.05em; /* @kind other */ --ls-mono: -0.01em; /* @kind other */
+
+  /* ---- Semantic roles ---- */
+  --text-display:  var(--fw-bold)     var(--fs-display-xl)/var(--lh-display-xl) var(--font-display);
+  --text-heading:  var(--fw-bold)     var(--fs-h1)/var(--lh-h1) var(--font-display);
+  --text-title:    var(--fw-semibold) var(--fs-h2)/var(--lh-h2) var(--font-sans);
+  --text-body:     var(--fw-book)     var(--fs-body)/var(--lh-body) var(--font-sans);
+  --text-label:    var(--fw-medium)   var(--fs-body-sm)/1.2 var(--font-sans);
+  --text-code:     var(--fw-medium)   var(--fs-mono)/var(--lh-mono) var(--font-mono);
+}

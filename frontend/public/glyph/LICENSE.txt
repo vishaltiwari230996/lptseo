@@ -1,0 +1,15 @@
+Flat UI glyphs in this folder
+=============================
+
+Pack:    Solar Icon Set ("Bold" weight) — an iOS / SF-Symbols-style line of icons
+Author:  480 Design
+Source:  https://www.figma.com/community/file/1166831539721848736
+         (mirrored via the Iconify API: https://api.iconify.design/solar/...)
+License: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+
+CC BY 4.0 permits commercial use and modification WITH attribution to the author
+(480 Design / Solar Icon Set). Icons here are recolored white for use on the
+gradient "app-tile" backgrounds.
+
+Files: design (palette), seo (magnifer), copy (pen), social (chat), ads (target),
+data (chart), rocket, teams (users-group), bolt, clock.

@@ -1,0 +1,702 @@
+/* SEO agent (a2) — rides the MR desk chrome (.mr-app/.mr-top/.mr-section) and
+   adds only its own vocabulary: brand cards, the fix list, and topic rows.
+   Semantic aliases only, so every data-theme variant holds. */
+
+.seo-sources { display: flex; gap: 6px; }
+
+.seo-chip {
+  font: 600 11px/1 var(--font-sans);
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.seo-chip--on { color: var(--green-500); border-color: color-mix(in srgb, var(--green-500) 45%, transparent); }
+.seo-chip--off { color: var(--text-tertiary); text-decoration: line-through; }
+/* proxy: connected and usable, but NOT the product named on the chip — amber
+   because it is a caveat on the number, not an alarm */
+.seo-chip--warn { color: var(--amber-500); border-color: color-mix(in srgb, var(--amber-500) 45%, transparent); }
+.seo-chip--trend-rising { color: var(--green-500); }
+.seo-chip--trend-falling { color: var(--red-500); }
+.seo-chip--trend-new { color: var(--text-primary); }
+.seo-chip--diff-easy { color: var(--green-500); border-color: color-mix(in srgb, var(--green-500) 45%, transparent); }
+.seo-chip--diff-medium { color: var(--amber-500); }
+.seo-chip--diff-hard { color: var(--red-500); }
+
+/* Brand cards ------------------------------------------------------------- */
+.seo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.seo-card {
+  display: grid; gap: 12px; align-content: start;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+}
+.seo-card:hover { background: var(--surface-hover); }
+.seo-card__head { display: grid; gap: 2px; }
+.seo-card__name { font: 600 15px/1.2 var(--font-display); }
+.seo-card__domain { font: 500 12px/1.2 var(--font-mono); color: var(--text-tertiary); }
+.seo-card__stats { display: flex; gap: 18px; }
+.seo-card__meta { display: flex; gap: 12px; align-items: center; font: 500 11.5px/1 var(--font-sans); color: var(--text-tertiary); }
+.seo-card__meta svg { color: var(--amber-500); }
+.seo-card__empty { font: 500 12.5px/1.4 var(--font-sans); color: var(--text-tertiary); }
+.seo-card--add {
+  border-style: dashed;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 120px;
+  color: var(--text-secondary);
+  font: 600 13px/1 var(--font-sans);
+}
+.seo-card--form { cursor: default; }
+
+.seo-input {
+  font: 500 13px/1.2 var(--font-sans);
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-primary);
+}
+.seo-form__row { display: flex; gap: 8px; }
+
+.seo-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font: 600 12.5px/1 var(--font-sans);
+  padding: 9px 13px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.seo-btn:hover { background: var(--surface-hover); }
+.seo-btn--primary { background: var(--text-primary); color: var(--surface-card); border-color: var(--text-primary); }
+.seo-btn--primary:hover { opacity: 0.88; background: var(--text-primary); }
+.seo-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Stats ------------------------------------------------------------------- */
+.seo-summary {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 18px;
+}
+.seo-stat { display: grid; gap: 4px; }
+.seo-stat__label {
+  font: 600 10.5px/1.2 var(--font-mono);
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.seo-stat__num {
+  font: 600 18px/1.1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.seo-stat__num--good { color: var(--green-500); font-variant-numeric: tabular-nums; }
+.seo-delta { display: inline-flex; align-items: center; gap: 3px; font: 600 12px/1 var(--font-mono); }
+.seo-delta--up { color: var(--green-500); }
+/* Down is information, not an alarm — red is reserved for things that are broken. */
+.seo-delta--down { color: var(--text-tertiary); }
+
+/* Story-first detail: calm sentence-case titles across the SEO panel. */
+.seo-app .mr-section__title {
+  font: 600 13.5px/1.3 var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+/* The story — the panel speaks first, in sentences, not stats. */
+.seo-story { display: grid; gap: 6px; max-width: 640px; }
+.seo-story p { margin: 0; font: 400 17px/1.55 var(--font-display); color: var(--text-primary); }
+.seo-story strong { font-weight: 650; }
+
+/* This week — the one card that tells you what to do. */
+.seo-hero {
+  display: grid; gap: 12px;
+  border: 1px solid color-mix(in srgb, var(--green-500) 30%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--green-500) 4%, var(--surface-card));
+  padding: 16px 18px;
+}
+.seo-hero__title {
+  font: 600 11px/1.2 var(--font-mono);
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--green-500);
+}
+.seo-hero__item { display: flex; gap: 12px; align-items: flex-start; }
+.seo-hero__num {
+  display: grid; place-items: center;
+  min-width: 24px; height: 24px;
+  font: 700 12px/1 var(--font-mono);
+  color: var(--green-500);
+  border: 1px solid color-mix(in srgb, var(--green-500) 45%, transparent);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.seo-hero__body { display: grid; gap: 3px; min-width: 0; }
+.seo-hero__action { font: 600 14px/1.4 var(--font-sans); }
+.seo-hero__detail { font: 400 12.5px/1.5 var(--font-sans); color: var(--text-secondary); }
+
+/* Folds — everything else waits quietly until asked. */
+.seo-fold { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-card); }
+.seo-fold__head {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 13px 14px;
+  border: none; background: none;
+  font: 600 13.5px/1.2 var(--font-sans);
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+}
+.seo-fold__head:hover { background: var(--surface-hover); border-radius: var(--radius-md); }
+.seo-fold__head svg { color: var(--text-tertiary); flex-shrink: 0; }
+.seo-fold__title { flex-shrink: 0; }
+.seo-fold__count {
+  font: 600 11px/1 var(--font-mono);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+}
+.seo-fold__hint {
+  font: 400 12.5px/1.3 var(--font-sans);
+  color: var(--text-tertiary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-left: auto;
+}
+.seo-fold__body { padding: 4px 14px 14px; display: grid; gap: 14px; }
+.seo-fold__body > .mr-section { border: none; padding: 0; background: none; }
+
+button.seo-chip { background: transparent; cursor: pointer; }
+button.seo-chip:hover { background: var(--surface-hover); }
+
+.seo-detail__bar { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.seo-detail__actions { display: flex; gap: 8px; }
+
+.seo-degraded {
+  display: flex; gap: 10px; align-items: flex-start;
+  border: 1px solid color-mix(in srgb, var(--amber-500) 45%, transparent);
+  background: color-mix(in srgb, var(--amber-500) 8%, transparent);
+  border-radius: var(--radius-md);
+  padding: 11px 13px;
+  font: 500 12.5px/1.5 var(--font-sans);
+  color: var(--text-primary);
+}
+.seo-degraded svg { color: var(--amber-500); flex-shrink: 0; margin-top: 2px; }
+
+.seo-insights { margin: 0; padding-left: 18px; display: grid; gap: 6px; font: 500 13px/1.5 var(--font-sans); }
+.seo-empty { font: 500 13px/1.5 var(--font-sans); color: var(--text-tertiary); }
+
+/* Fix list ---------------------------------------------------------------- */
+.seo-todo {
+  display: flex; gap: 14px; align-items: flex-start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.seo-todo--done { opacity: 0.55; }
+.seo-todo__gain {
+  display: grid; gap: 2px; justify-items: center;
+  min-width: 74px;
+  font: 700 16px/1 var(--font-mono);
+  color: var(--green-500);
+  font-variant-numeric: tabular-nums;
+}
+.seo-todo__gain small { font: 600 9.5px/1.2 var(--font-sans); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; }
+.seo-todo__body { display: grid; gap: 4px; flex: 1; min-width: 0; }
+.seo-todo__action { font: 600 13.5px/1.35 var(--font-sans); }
+.seo-todo__why { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-secondary); }
+.seo-todo__meta { display: flex; flex-wrap: wrap; gap: 10px; font: 500 11.5px/1 var(--font-mono); color: var(--text-tertiary); }
+.seo-status {
+  font: 600 12px/1 var(--font-sans);
+  padding: 7px 9px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.seo-status--assigned { color: var(--amber-500); }
+.seo-status--done { color: var(--green-500); }
+
+.seo-todo__rank {
+  display: grid; place-items: center;
+  min-width: 22px; height: 22px;
+  font: 700 11px/1 var(--font-mono);
+  color: var(--text-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.seo-todo__more { justify-self: center; }
+
+/* Topic lab --------------------------------------------------------------- */
+.seo-topic {
+  display: flex; gap: 14px; align-items: flex-start; justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.seo-topic__main { display: grid; gap: 6px; min-width: 0; }
+.seo-topic__kw { font: 600 13.5px/1.35 var(--font-sans); }
+.seo-topic__chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.seo-topic__why { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-secondary); }
+.seo-topic__nums { display: grid; gap: 4px; justify-items: end; text-align: right; flex-shrink: 0; font: 600 12px/1.3 var(--font-mono); }
+.seo-topic__vol { color: var(--text-tertiary); }
+.seo-topic__num {
+  display: inline-block;
+  min-width: 18px;
+  color: var(--text-tertiary);
+  font: 600 12.5px/1.35 var(--font-mono);
+}
+
+.seo-avoided { margin-top: 4px; }
+.seo-avoided__toggle { width: 100%; justify-content: flex-start; }
+.seo-avoided__list { display: grid; gap: 8px; margin-top: 8px; }
+.seo-avoided__row {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+}
+.seo-avoided__reason { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-tertiary); }
+
+@media (max-width: 640px) {
+  .seo-todo, .seo-topic { flex-direction: column; }
+  .seo-todo__gain { justify-items: start; }
+}
+
+/* Researcher layer: keyword lab, competitors, briefs, audit ---------------- */
+.seo-stack { display: grid; gap: 16px; }
+.seo-lab__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.seo-lab__meta { font: 500 12px/1.4 var(--font-sans); color: var(--text-tertiary); }
+.seo-input--grow { flex: 1; min-width: 0; }
+
+.seo-chip--cov-gap { color: var(--amber-500); border-color: color-mix(in srgb, var(--amber-500) 45%, transparent); }
+.seo-chip--cov-weak { color: var(--text-secondary); }
+.seo-chip--cov-ranking { color: var(--green-500); }
+.seo-chip--sev-high { color: var(--red-500); border-color: color-mix(in srgb, var(--red-500) 45%, transparent); }
+.seo-chip--sev-medium { color: var(--amber-500); }
+.seo-chip--sev-low { color: var(--text-tertiary); }
+.seo-chip--verdict-publish-ready { color: var(--green-500); }
+.seo-chip--verdict-needs-work { color: var(--amber-500); }
+.seo-chip--verdict-rework { color: var(--red-500); }
+.seo-chip__x {
+  border: 0; background: none; color: inherit; cursor: pointer;
+  font: inherit; padding: 0 0 0 4px; line-height: 1;
+}
+
+.seo-cluster, .seo-brief, .seo-issue {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+.seo-cluster summary, .seo-brief summary, .seo-issue summary {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  cursor: pointer; list-style: none;
+}
+.seo-cluster summary::-webkit-details-marker, .seo-brief summary::-webkit-details-marker,
+.seo-issue summary::-webkit-details-marker { display: none; }
+.seo-cluster__name { font: 600 13.5px/1.3 var(--font-sans); }
+.seo-cluster__chips { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.seo-cluster__nums { margin-left: auto; font: 600 12px/1 var(--font-mono); color: var(--text-tertiary); }
+.seo-cluster__kws { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 10px; }
+
+.seo-shift { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); }
+.seo-shift:last-child { border-bottom: 0; }
+.seo-shift__kw { font: 600 13px/1.3 var(--font-sans); min-width: 0; }
+.seo-shift__pos { font: 600 12.5px/1 var(--font-mono); }
+.seo-shift__top { margin-left: auto; font: 500 11.5px/1 var(--font-mono); color: var(--text-tertiary); }
+
+.seo-feed { display: grid; gap: 4px; padding-top: 10px; }
+.seo-feed__head { display: flex; gap: 10px; align-items: baseline; font: 600 13px/1.3 var(--font-sans); }
+.seo-feed__url { font: 500 12px/1.4 var(--font-mono); color: var(--text-secondary); word-break: break-all; }
+.seo-feed__url:hover { color: var(--text-primary); }
+
+.seo-brief__outline { margin: 10px 0 0; padding-left: 20px; display: grid; gap: 8px; }
+.seo-brief__outline li { font: 600 13px/1.4 var(--font-sans); }
+.seo-brief__outline li span { display: block; font: 400 12.5px/1.4 var(--font-sans); color: var(--text-secondary); }
+.seo-brief__block { display: grid; gap: 6px; padding-top: 12px; }
+.seo-brief__line { font: 500 12.5px/1.5 var(--font-sans); color: var(--text-secondary); word-break: break-word; }
+
+.seo-audit__score { display: flex; align-items: baseline; gap: 10px; }
+.seo-audit__num { font: 700 34px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.seo-issue__fix { font: 500 12.5px/1.5 var(--font-sans); padding: 8px 0 4px; }
+
+.seo-textarea { min-height: 180px; resize: vertical; font-family: var(--font-mono); font-size: 12.5px; }
+.seo-scorecard { display: grid; gap: 8px; }
+.seo-check {
+  display: flex; align-items: baseline; gap: 8px;
+  font: 500 12.5px/1.4 var(--font-sans); color: var(--red-500);
+}
+.seo-check--ok { color: var(--text-primary); }
+.seo-check--ok svg { color: var(--green-500); }
+.seo-check__name { font-weight: 600; white-space: nowrap; }
+.seo-check__note { color: var(--text-secondary); }
+
+.seo-plan { display: grid; gap: 5px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: var(--radius-md); }
+
+/* Rank-tracking mode (no Search Console): position replaces the gain figure. */
+.seo-todo__gain--pos { color: var(--text-primary); }
+
+/* Tiers, topic impact, and the Ask thread ---------------------------------- */
+.seo-tier { display: grid; gap: 8px; }
+.seo-tier__head { display: flex; align-items: center; gap: 10px; padding-top: 6px; }
+.seo-chip--tier-high { color: var(--green-500); border-color: color-mix(in srgb, var(--green-500) 45%, transparent); font-weight: 700; }
+.seo-chip--tier-medium { color: var(--amber-500); }
+.seo-chip--tier-watch { color: var(--text-tertiary); }
+.seo-cluster__rec { flex-basis: 100%; font: 500 12.5px/1.45 var(--font-sans); color: var(--text-primary); }
+.seo-cluster__owners { flex-basis: 100%; font: 500 11.5px/1.4 var(--font-mono); color: var(--text-tertiary); }
+.seo-topic__impact { font: 500 12px/1.45 var(--font-sans); color: var(--green-500); }
+
+.seo-ask { min-height: 380px; }
+.seo-ask__thread { display: grid; gap: 10px; }
+.seo-msg {
+  max-width: 85%;
+  padding: 10px 13px;
+  border-radius: var(--radius-md);
+  font: 500 13px/1.55 var(--font-sans);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.seo-msg--user { justify-self: end; background: var(--text-primary); color: var(--surface-card); }
+.seo-msg--agent { justify-self: start; border: 1px solid var(--border); background: var(--surface-card); }
+.seo-msg--busy { color: var(--text-tertiary); }
+
+.seo-card__gsc { margin-left: 8px; font-size: 10px; padding: 3px 7px; vertical-align: 2px; }
+
+/* Card headline + plan of action ------------------------------------------- */
+.seo-card__headline { font: 500 12.5px/1.45 var(--font-sans); color: var(--text-primary); }
+.seo-poa { border-left: 3px solid var(--green-500); }
+.seo-poa__item { display: flex; gap: 12px; align-items: flex-start; }
+.seo-poa__num {
+  font: 700 13px/1 var(--font-mono);
+  color: var(--green-500);
+  border: 1px solid color-mix(in srgb, var(--green-500) 45%, transparent);
+  border-radius: 999px;
+  padding: 5px 9px;
+  flex-shrink: 0;
+}
+.seo-poa__body { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.seo-poa__action { font: 600 13.5px/1.35 var(--font-sans); }
+.seo-poa__detail { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-secondary); }
+
+/* Website analytics (GA4) ------------------------------------------------- */
+.seo-ga__src {
+  margin-left: 10px;
+  font: 500 11px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.seo-ga__cols {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px;
+  margin-top: 12px;
+}
+@media (max-width: 720px) { .seo-ga__cols { grid-template-columns: 1fr; } }
+.seo-ga__list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 2px; }
+.seo-ga__list li {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  font: 500 13px/1.4 var(--font-sans);
+}
+.seo-ga__list li:last-child { border-bottom: none; }
+.seo-ga__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.seo-ga__num {
+  display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0;
+  font: 600 12.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+/* Pages tab ----------------------------------------------------------------- */
+.seo-pages__row {
+  display: flex; gap: 16px; align-items: flex-start; justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.seo-pages__main { display: grid; gap: 6px; min-width: 0; flex: 1; }
+.seo-pages__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.seo-pages__path {
+  font: 600 12.5px/1.3 var(--font-mono);
+  color: var(--text-primary);
+}
+a.seo-pages__path:hover { color: var(--green-500); }
+.seo-pages__title { font: 500 12.5px/1.35 var(--font-sans); color: var(--text-secondary); }
+.seo-pages__flags { display: flex; flex-wrap: wrap; gap: 6px; }
+.seo-pages__rec { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-secondary); }
+.seo-pages__nums {
+  display: grid; gap: 4px; justify-items: end; text-align: right; flex-shrink: 0;
+  font: 500 11.5px/1.3 var(--font-mono); color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.seo-pages__query { color: var(--text-secondary); }
+
+@media (max-width: 640px) {
+  .seo-pages__row { flex-direction: column; }
+  .seo-pages__nums { justify-items: start; text-align: left; }
+}
+
+/* Top competitors — profile cards + content feed --------------------------- */
+.seo-comp__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.seo-comp__card {
+  display: grid; gap: 12px; align-content: start;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+.seo-comp__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 0; background: none; padding: 0;
+  font: inherit; color: var(--text-primary);
+  cursor: pointer; text-align: left;
+}
+.seo-comp__head svg { color: var(--text-tertiary); flex-shrink: 0; }
+.seo-comp__domain { font: 600 13.5px/1.3 var(--font-mono); }
+.seo-comp__stats { display: flex; gap: 18px; }
+.seo-comp__section { display: grid; gap: 8px; padding-top: 4px; border-top: 1px solid var(--border); }
+.seo-comp__kw { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.seo-comp__kw-name { font: 600 12.5px/1.35 var(--font-sans); min-width: 0; }
+.seo-comp__kw-pos { font: 500 11.5px/1 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.seo-comp__post { display: grid; gap: 4px; }
+.seo-comp__post-title { font: 600 12.5px/1.4 var(--font-sans); color: var(--text-primary); word-break: break-word; }
+.seo-comp__post-title:hover { color: var(--green-500); }
+.seo-comp__post-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.seo-comp__reach { font: 500 11.5px/1 var(--font-mono); color: var(--text-tertiary); }
+
+/* =========================================================================
+   Premium pass — added with the Law Prep Tutorial rebrand.
+   Layered at the end of this file rather than edited into the rules above, so
+   what the extract shipped with stays readable as one block and this stays
+   reviewable as another.
+   ========================================================================= */
+
+/* Figures are the point of this panel, so they get the brand's serif at a size
+   that earns it — the same treatment as the rank numbers on the landing page,
+   which is what makes signed-out and signed-in read as one product. Tabular so
+   a column of numbers lines up and so a value that updates does not reflow. */
+.seo-app .seo-stat__num {
+  font: 620 28px/1.05 var(--font-display);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
+  gap: 10px;
+}
+.seo-app .seo-stat { gap: 6px; }
+
+/* Sentence case, no tracking. The tracked-out uppercase these labels had is a
+   decoration that costs legibility at 10.5px, and this file already committed
+   to "calm sentence-case titles across the SEO panel" for section headings —
+   this is that decision applied to the last place it had not reached. */
+.seo-app .seo-stat__label,
+.seo-app .seo-hero__title {
+  font: 600 12px/1.3 var(--font-sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.seo-app .seo-summary {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 18px 20px;
+  gap: 18px;
+}
+
+/* Brand cards — the grid you land on. A card is a door, so it says so on
+   hover: it lifts a little and takes the brand keyline. */
+.seo-app .seo-card {
+  border-color: var(--border-subtle);
+  border-radius: var(--radius-xl);
+  padding: 18px;
+  box-shadow: var(--shadow-xs);
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.seo-app .seo-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--brand-border);
+  background: var(--surface-card);
+}
+.seo-app .seo-card:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.seo-app .seo-card__name { font: 620 16px/1.25 var(--font-display); letter-spacing: -0.02em; }
+.seo-app .seo-card--add:hover { border-color: var(--brand-border); color: var(--brand); }
+
+/* The primary action is the brand's, not neutral ink. --on-action flips with
+   the theme (cloud on red, ink on yellow), so the label stays readable in both. */
+.seo-app .seo-btn {
+  border-radius: 999px;
+  padding: 9px 16px;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.seo-app .seo-btn--primary {
+  background: var(--action);
+  border-color: var(--action);
+  color: var(--on-action);
+}
+.seo-app .seo-btn--primary:hover:not(:disabled) {
+  background: var(--action-active);
+  border-color: var(--action-active);
+  opacity: 1;
+}
+.seo-app .seo-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.seo-app .seo-fold { border-color: var(--border-subtle); border-radius: var(--radius-lg); }
+.seo-app .seo-fold__head { border-radius: var(--radius-lg); }
+
+/* An empty state is an invitation, so it is given room and a readable measure
+   rather than being left as one grey line of 13px text. */
+.seo-app .seo-empty {
+  padding: 22px 4px;
+  max-width: 56ch;
+  font: 450 13.5px/1.6 var(--font-sans);
+  color: var(--text-secondary);
+}
+
+/* The story paragraph is the panel talking. Serif, because it is prose. */
+.seo-app .seo-story p {
+  font: 450 17.5px/1.6 var(--font-sans);
+  letter-spacing: -0.008em;
+}
+.seo-app .seo-story strong { font-weight: 600; }
+
+/* =========================================================================
+   Reading pass.
+   The panel got wider so it would stop floating in the middle of a large
+   screen. Width is good for rows — a fold is a title on the left and a hint on
+   the right, and it reads better with room. Width is bad for prose: at 1500px
+   the top finding was running about 150 characters a line, roughly double the
+   comfortable measure, which is what made this page tiring rather than merely
+   dense. So the containers stay wide and the sentences do not.
+   ========================================================================= */
+
+/* One rhythm down the brand page. These blocks were siblings with no shared
+   spacing, so the stack read as one continuous slab. */
+.seo-app .mr-panel { display: grid; gap: 15px; align-content: start; }
+.seo-app .mr-panel__head { margin-bottom: 0; }
+
+/* The week's actions — the most-read text in the console, and it was set at
+   12.5px across the full width. Bigger, looser, and stopped well short of the
+   right edge. */
+.seo-app .seo-hero { padding: 20px 22px; gap: 14px; }
+.seo-app .seo-hero__item { gap: 14px; }
+.seo-app .seo-hero__body { gap: 6px; }
+/* Measures are set in rem, not ch, and the difference is not pedantry: `ch` is
+   the advance of "0", which in Geist is about 30% wider than the average
+   character. A `84ch` cap measured out at 109 real characters — comfortably
+   into the range where the eye loses the start of the next line. These numbers
+   come from measuring the rendered text (scratchpad/measure.mjs), not from a
+   ratio.
+
+   Size went up at the same time. Two-thirds of the strain here was 13.5px body
+   text carrying paragraph-length content; a larger face fixes what a narrower
+   column alone cannot. */
+.seo-app .seo-hero__action {
+  font: 620 16.5px/1.5 var(--font-sans);
+  letter-spacing: -0.013em;
+  max-width: 36rem;   /* ~65 characters */
+}
+.seo-app .seo-hero__detail {
+  font: 450 15px/1.72 var(--font-sans);
+  color: var(--text-secondary);
+  max-width: 37rem;   /* ~77 characters */
+}
+
+/* Degraded sources are a caveat, not an alarm, and there are usually four of
+   them at once — as a full-width block of amber they dominated a page whose
+   actual subject is the findings above. Quieter ground, one line each with air
+   between, and a measure that stops before the right edge. */
+.seo-app .seo-degraded {
+  gap: 12px;
+  padding: 14px 16px;
+  border-color: color-mix(in srgb, var(--amber-500) 26%, transparent);
+  background: color-mix(in srgb, var(--amber-500) 5%, transparent);
+  font: 450 13.5px/1.7 var(--font-sans);
+  color: var(--text-secondary);
+}
+.seo-app .seo-degraded > div > div + div { margin-top: 9px; }
+.seo-app .seo-degraded > div { max-width: 33rem; }   /* ~76 characters */
+
+/* Folds are rows, so they keep the full width — they just needed room to
+   breathe and a target big enough to hit without aiming. */
+.seo-app .seo-fold__head { padding: 15px 18px; gap: 12px; }
+.seo-app .seo-fold__body { padding: 6px 18px 18px; }
+
+/* The opening sentence is the page talking; give it the measure of a sentence. */
+.seo-app .seo-story { max-width: 34rem; }   /* ~64 characters at 17.5px */
+
+/* Anything prose-shaped inside a fold gets a measure too, or the same problem
+   simply moves one level down. */
+.seo-app .mr-section__title { max-width: 40rem; }
+.seo-app .seo-insights { max-width: 38rem; line-height: 1.7; font-size: 13.5px; }
+.seo-app .seo-poa__action { max-width: 38rem; }
+
+/* Wide screens: the week's actions and the source caveats share a row.
+ *
+ * Capping the measure fixed the reading but left both blocks as full-width
+ * cards with 600px of empty right-hand side, which reads as a mistake rather
+ * than as breathing room. Side by side, the width is actually used and the
+ * lines stay short — and it puts the caveats beside the work rather than
+ * between the work and the detail below it.
+ *
+ * Scoped by adjacency on purpose. `:has(+ .seo-degraded)` means the actions
+ * card only narrows when there is something to sit next to it, and the caveats
+ * only narrow when they follow it — a run with no plan, or no degraded
+ * sources, still gets a full-width block instead of a stranded quarter-width
+ * one. A browser without `:has()` simply keeps the stack, which is the
+ * layout this replaces. */
+@media (min-width: 1280px) {
+  .seo-app .mr-panel { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  .seo-app .mr-panel > * { grid-column: 1 / -1; }
+  .seo-app .seo-hero:has(+ .seo-degraded) { grid-column: span 7; }
+  .seo-app .seo-hero + .seo-degraded { grid-column: span 5; align-content: start; }
+}
+
+/* ---- Fix list ----------------------------------------------------------- */
+/* This is where the console's longest text lives — a model-written action and
+   its evidence, one per row, ten rows — and it had none of the treatment the
+   blocks above it got. Same rules: a measure, a readable size, and text that
+   can always wrap.
+   `overflow-wrap: anywhere` on the last two is not decoration. A single
+   unbroken token (a long path, a percent-encoded string) has nowhere to break,
+   so it widens its row, which widens the panel, which scrolls the whole page
+   sideways. Nothing in a console should ever do that. */
+.seo-app .seo-todo { padding: 16px 18px; gap: 16px; }
+.seo-app .seo-todo__body { gap: 7px; min-width: 0; }
+.seo-app .seo-todo__action {
+  font: 620 15.5px/1.5 var(--font-sans);
+  letter-spacing: -0.012em;
+  max-width: 33rem;              /* ~64 characters, measured */
+  overflow-wrap: anywhere;
+}
+.seo-app .seo-todo__why {
+  font: 450 14.5px/1.72 var(--font-sans);
+  color: var(--text-secondary);
+  max-width: 34rem;              /* ~73 characters, measured */
+  overflow-wrap: anywhere;
+}
+.seo-app .seo-todo__meta {
+  gap: 6px 14px;
+  font: 500 12px/1.5 var(--font-mono);
+  max-width: 34rem;
+  overflow-wrap: anywhere;
+}
+
+/* Belt and braces: the panel is a grid, and a grid item's default `min-width:
+   auto` lets an over-wide child push the track wider than the container. This
+   is what turns one unbreakable string into a horizontal scrollbar on the
+   whole document. */
+.seo-app .mr-panel > * { min-width: 0; }
+.seo-app .mr-section { min-width: 0; }

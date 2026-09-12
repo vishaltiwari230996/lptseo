@@ -1,0 +1,354 @@
+/* Deep audit — landing pages, sitemap, cannibalization, density, page speed.
+ *
+ * Two rules carried over from the reading pass, because this surface is the
+ * densest in the console:
+ *   1. Prose keeps a measured line length (rem, not ch — see seo.css for why).
+ *      Tables do not, because a table is read across columns, not along lines.
+ *   2. Every table lives in .deep-table-wrap, which scrolls on its own. A wide
+ *      table must scroll inside its card; it must never widen the page.
+ */
+
+.seo-app .deep { display: grid; gap: 16px; min-width: 0; }
+
+.seo-app .deep-head {
+  display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap;
+}
+.seo-app .deep-head__sub {
+  margin: 4px 0 0;
+  max-width: 38rem;
+  font: 450 13.5px/1.6 var(--font-sans);
+  color: var(--text-secondary);
+}
+
+/* ---- job progress ------------------------------------------------------- */
+.seo-app .deep-job {
+  display: grid; gap: 8px;
+  padding: 12px 16px;
+  border: 1px solid var(--brand-border);
+  background: var(--brand-subtle);
+  border-radius: var(--radius-lg);
+}
+.seo-app .deep-job__head {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  font: 450 13px/1.4 var(--font-sans); color: var(--text-secondary);
+}
+.seo-app .deep-job__head strong { color: var(--text-primary); font-weight: 620; }
+.seo-app .deep-job__spin {
+  width: 12px; height: 12px; border-radius: 999px;
+  border: 2px solid var(--brand-border); border-top-color: var(--brand);
+  animation: deep-spin 800ms linear infinite;
+}
+@keyframes deep-spin { to { transform: rotate(360deg); } }
+.seo-app .deep-job__track { height: 6px; border-radius: 999px; background: var(--surface-active); overflow: hidden; }
+.seo-app .deep-job__track span { display: block; height: 100%; background: var(--brand); transition: width 400ms var(--ease-out); }
+
+/* ---- stats -------------------------------------------------------------- */
+.seo-app .deep-overview,
+.seo-app .deep-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  gap: 10px;
+}
+.seo-app .deep-stat {
+  display: grid; gap: 2px; align-content: start;
+  padding: 11px 14px;
+  border: 1px solid var(--border-subtle);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  min-width: 0;
+}
+.seo-app .deep-stat span { font: 500 12px/1.35 var(--font-sans); color: var(--text-tertiary); }
+.seo-app .deep-stat strong {
+  font: 650 20px/1.2 var(--font-display);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.03em;
+}
+.seo-app .deep-stat--good { border-left-color: var(--green-500); }
+.seo-app .deep-stat--good strong { color: var(--green-600); }
+.seo-app .deep-stat--warn { border-left-color: var(--amber-500); }
+.seo-app .deep-stat--warn strong { color: var(--amber-600); }
+.seo-app .deep-stat--bad { border-left-color: var(--red-500); }
+.seo-app .deep-stat--bad strong { color: var(--red-600); }
+
+/* ---- tabs --------------------------------------------------------------- */
+.seo-app .deep-tabs {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.seo-app .deep-tab {
+  padding: 10px 14px;
+  border: none; background: none; cursor: pointer;
+  font: 600 13.5px/1 var(--font-sans); letter-spacing: -0.01em;
+  color: var(--text-tertiary);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.seo-app .deep-tab:hover { color: var(--text-primary); }
+.seo-app .deep-tab--on { color: var(--text-primary); border-bottom-color: var(--brand); }
+.seo-app .deep-tab:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.seo-app .deep-tabbody { display: grid; gap: 22px; min-width: 0; }
+.seo-app .deep-tabbody > section { display: grid; gap: 10px; min-width: 0; }
+.seo-app .deep-h4 {
+  margin: 0;
+  font: 650 15px/1.3 var(--font-display); letter-spacing: -0.02em;
+}
+.seo-app .deep-rule {
+  margin: 0; max-width: 42rem;
+  font: 450 13.5px/1.65 var(--font-sans); color: var(--text-secondary);
+}
+.seo-app .deep-sub {
+  display: block;
+  font: 450 11.5px/1.4 var(--font-sans); color: var(--text-tertiary);
+}
+
+/* ---- template callout --------------------------------------------------- */
+.seo-app .deep-callout {
+  display: grid; gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--red-500) 28%, var(--border));
+  background: color-mix(in srgb, var(--red-500) 4%, var(--surface-card));
+  border-radius: var(--radius-lg);
+}
+.seo-app .deep-callout h4 { margin: 0; font: 650 15px/1.3 var(--font-display); letter-spacing: -0.02em; }
+.seo-app .deep-tpl { display: flex; gap: 12px; align-items: flex-start; min-width: 0; }
+
+/* ---- tables ------------------------------------------------------------- */
+.seo-app .deep-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  max-width: 100%;
+}
+.seo-app .deep-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 450 13px/1.45 var(--font-sans);
+}
+.seo-app .deep-table th {
+  position: sticky; top: 0;
+  text-align: left;
+  padding: 9px 12px;
+  font: 600 11.5px/1.3 var(--font-sans); color: var(--text-tertiary);
+  background: var(--surface-sunken);
+  border-bottom: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+.seo-app .deep-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+.seo-app .deep-table tr:last-child td { border-bottom: none; }
+.seo-app .deep-table--tight td, .seo-app .deep-table--tight th { padding: 6px 10px; font-size: 12.5px; }
+.seo-app .deep-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seo-app .deep-table code {
+  font: 500 12px/1.4 var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.seo-app .deep-url { min-width: 220px; max-width: 420px; overflow-wrap: anywhere; }
+/* The first column names the row — a URL, a sitemap file, a check. With code
+   allowed to break anywhere, a phone squeezed it to one character per line; it
+   keeps a readable width and the table scrolls sideways instead. */
+.seo-app .deep-table td:first-child { min-width: 11rem; }
+/* An opened row spans the whole table, which on a phone is wider than the
+   screen: its sentences ran past the edge and had to be scrolled to be read.
+   Its content stays on screen, at the screen's width, while the table scrolls. */
+@media (max-width: 720px) {
+  /* 8.5rem = the page gutter, card, fold and cell padding on both sides. */
+  .seo-app .deep-expand > * { position: sticky; left: 16px; max-width: calc(100vw - 8.5rem); }
+}
+.seo-app .deep-row { cursor: pointer; }
+.seo-app .deep-row:hover td { background: var(--surface-hover); }
+.seo-app .deep-row--bad td { color: var(--red-600); }
+.seo-app .deep-caret { width: 24px; color: var(--text-tertiary); text-align: center; }
+.seo-app .deep-expand { background: var(--surface-sunken); padding: 14px 16px !important; }
+.seo-app .deep-expand__meta {
+  display: flex; flex-wrap: wrap; gap: 6px 22px;
+  margin-bottom: 12px;
+  font: 450 12.5px/1.5 var(--font-sans); color: var(--text-secondary);
+}
+.seo-app .deep-expand__meta strong { color: var(--text-primary); font-weight: 600; margin-right: 4px; }
+
+/* ---- page speed: what painted, what moved -------------------------------- */
+.seo-app .deep-two--tight { gap: 16px; margin-bottom: 14px; }
+/* A name and a number, no bar: the name gets the room, the number sits right. */
+/* (Doubled class: the base .deep-hbar grid comes later in this file.) */
+.seo-app .deep-hbar.deep-hbar--pair { grid-template-columns: minmax(0, 1fr) auto; gap: 16px; }
+.seo-app .deep-hbar.deep-hbar--pair .deep-hbar__label code { overflow-wrap: anywhere; }
+.seo-app .deep-hbar.deep-hbar--pair .deep-hbar__n { text-align: right; white-space: nowrap; }
+.seo-app .deep-h5 {
+  margin: 0;
+  font: 600 12.5px/1.4 var(--font-sans); color: var(--text-primary);
+}
+.seo-app .deep-steps {
+  margin: 0; padding: 0; list-style: none;
+  display: grid; gap: 6px;
+  font: 450 12.5px/1.5 var(--font-sans); color: var(--text-secondary);
+}
+.seo-app .deep-steps li {
+  display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: 10px; align-items: baseline;
+}
+.seo-app .deep-steps__t { font-variant-numeric: tabular-nums; color: var(--text-primary); text-align: right; }
+.seo-app .deep-steps__what { min-width: 0; overflow-wrap: anywhere; }
+.seo-app .deep-steps__what code { margin-right: 6px; }
+.seo-app .deep-steps__tag {
+  display: inline-block; margin-right: 6px;
+  padding: 0 7px; border-radius: 999px;
+  font: 550 11px/1.6 var(--font-sans);
+  background: var(--surface-active); color: var(--text-secondary);
+}
+.seo-app .deep-steps__tag code { margin: 0; }
+.seo-app .deep-steps__tag--lcp {
+  background: color-mix(in srgb, var(--red-500) 12%, var(--surface-card)); color: var(--red-600);
+}
+
+.seo-app .deep-bar {
+  display: inline-block; width: 90px; height: 6px;
+  border-radius: 999px; background: var(--surface-active); overflow: hidden; vertical-align: middle;
+}
+.seo-app .deep-bar span { display: block; height: 100%; background: var(--red-500); }
+.seo-app .deep-chip-tpl { margin-left: 8px; }
+
+.seo-app .deep-grade {
+  display: inline-block; min-width: 46px; text-align: center;
+  padding: 2px 8px; border-radius: 999px;
+  font: 650 12px/1.4 var(--font-sans); font-variant-numeric: tabular-nums;
+}
+.seo-app .deep-grade--good { background: color-mix(in srgb, var(--green-500) 14%, transparent); color: var(--green-600); }
+.seo-app .deep-grade--warn { background: color-mix(in srgb, var(--amber-500) 16%, transparent); color: var(--amber-600); }
+.seo-app .deep-grade--bad  { background: color-mix(in srgb, var(--red-500) 14%, transparent); color: var(--red-600); }
+
+.seo-app .deep-rate {
+  display: inline-block; padding: 1px 7px; border-radius: 999px;
+  font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.seo-app .deep-rate--good { background: color-mix(in srgb, var(--green-500) 14%, transparent); color: var(--green-600); }
+.seo-app .deep-rate--needs-improvement { background: color-mix(in srgb, var(--amber-500) 16%, transparent); color: var(--amber-600); }
+.seo-app .deep-rate--poor { background: color-mix(in srgb, var(--red-500) 14%, transparent); color: var(--red-600); }
+
+/* ---- findings ----------------------------------------------------------- */
+.seo-app .deep-findings { display: grid; gap: 8px; }
+.seo-app .deep-findings__group {
+  margin-top: 6px;
+  font: 650 12.5px/1.3 var(--font-sans); color: var(--text-secondary);
+}
+.seo-app .deep-finding__body { display: grid; gap: 4px; min-width: 0; }
+.seo-app .deep-evidence {
+  max-width: 44rem;
+  font: 500 12.5px/1.55 var(--font-mono);
+  color: var(--text-primary);
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  padding: 6px 9px;
+  overflow-wrap: anywhere;
+}
+.seo-app .deep-evlist {
+  margin: 4px 0 0; padding-left: 18px;
+  display: grid; gap: 4px;
+  max-width: 52rem;
+  font: 450 12.5px/1.55 var(--font-sans); color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.seo-app .deep-evlist code { font: 500 12px/1.4 var(--font-mono); color: var(--text-primary); }
+.seo-app .deep-issue { background: var(--surface-card); }
+
+.seo-chip--sev-info { color: var(--text-tertiary); }
+
+/* ---- controls ----------------------------------------------------------- */
+.seo-app .deep-more { justify-self: center; }
+.seo-app .deep-link {
+  justify-self: start; padding: 0; margin-top: 2px;
+  border: none; background: none; cursor: pointer;
+  font: 600 12.5px/1.4 var(--font-sans); color: var(--brand);
+}
+.seo-app .deep-link:hover { text-decoration: underline; }
+.seo-app .deep-check { display: inline-flex; gap: 6px; align-items: center; font: 450 13px/1 var(--font-sans); }
+.seo-app .deep-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.seo-app .deep-controls .deep-sub { display: inline; max-width: 36rem; }
+
+/* ---- cannibalization ---------------------------------------------------- */
+.seo-app .deep-kinds { display: flex; flex-wrap: wrap; gap: 8px; }
+.seo-app .deep-kind {
+  padding: 6px 12px;
+  border: 1px solid var(--border-subtle); border-radius: 999px;
+  font: 450 12.5px/1.3 var(--font-sans); color: var(--text-secondary);
+}
+.seo-app .deep-kind strong { color: var(--text-primary); font-weight: 650; margin-right: 4px; }
+.seo-app .deep-cluster {
+  display: grid; gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+  background: var(--surface-card);
+}
+.seo-app .deep-cluster__head { display: flex; gap: 12px; align-items: flex-start; }
+.seo-app .deep-cluster code { font: 500 12.5px/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.seo-app .deep-competitor {
+  display: grid; gap: 4px;
+  margin-left: 12px; padding-left: 14px;
+  border-left: 2px solid var(--border);
+}
+.seo-app .deep-competitor__head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.seo-app .deep-competitor__head .deep-sub { display: inline; }
+
+/* ---- method notes ------------------------------------------------------- */
+.seo-app .deep-method dl {
+  margin: 0; display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr); gap: 6px 18px;
+  max-width: 56rem;
+}
+.seo-app .deep-method dt { font: 600 12.5px/1.5 var(--font-sans); text-transform: capitalize; }
+.seo-app .deep-method dd { margin: 0; font: 450 12.5px/1.6 var(--font-sans); color: var(--text-secondary); }
+
+/* ---- density ------------------------------------------------------------ */
+.seo-app .deep-two {
+  display: grid; gap: 22px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+.seo-app .deep-two > section { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.seo-app .deep-hbar {
+  display: grid; grid-template-columns: minmax(0, 11rem) minmax(0, 1fr) auto; gap: 10px; align-items: center;
+  font: 450 12.5px/1.4 var(--font-sans);
+}
+.seo-app .deep-hbar__label { color: var(--text-secondary); overflow-wrap: anywhere; }
+.seo-app .deep-hbar__label code { font: 500 12px/1.4 var(--font-mono); color: var(--text-primary); }
+.seo-app .deep-hbar__track { height: 8px; border-radius: 999px; background: var(--surface-active); overflow: hidden; }
+.seo-app .deep-hbar__track span { display: block; height: 100%; background: var(--brand); }
+.seo-app .deep-hbar__track--bad span { background: var(--red-500); }
+.seo-app .deep-hbar__track--good span { background: var(--green-500); }
+.seo-app .deep-hbar__track--warn span { background: var(--amber-500); }
+.seo-app .deep-hbar__n { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; }
+
+.seo-app .deep-windows { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.seo-app .deep-win {
+  display: grid; place-items: center;
+  min-width: 26px; height: 26px; padding: 0 4px;
+  border-radius: var(--radius-sm);
+  font: 650 12px/1 var(--font-sans); font-variant-numeric: tabular-nums;
+  background: color-mix(in srgb, var(--green-500) 16%, transparent); color: var(--green-600);
+}
+.seo-app .deep-win--gap { background: color-mix(in srgb, var(--red-500) 16%, transparent); color: var(--red-600); }
+.seo-app .deep-win--hot { background: color-mix(in srgb, var(--amber-500) 20%, transparent); color: var(--amber-600); }
+.seo-app .deep-placement { display: flex; flex-wrap: wrap; gap: 6px; }
+.seo-app .deep-place {
+  padding: 4px 10px; border-radius: 999px;
+  font: 500 12px/1.3 var(--font-sans);
+  background: color-mix(in srgb, var(--red-500) 10%, transparent); color: var(--red-600);
+}
+.seo-app .deep-place--ok { background: color-mix(in srgb, var(--green-500) 12%, transparent); color: var(--green-600); }
+.seo-app .deep-verdict {
+  display: inline-block; padding: 2px 9px; border-radius: 999px;
+  font: 600 12px/1.4 var(--font-sans); white-space: nowrap;
+}
+.seo-app .deep-verdict--good { background: color-mix(in srgb, var(--green-500) 14%, transparent); color: var(--green-600); }
+.seo-app .deep-verdict--warn { background: color-mix(in srgb, var(--amber-500) 16%, transparent); color: var(--amber-600); }
+.seo-app .deep-verdict--bad { background: color-mix(in srgb, var(--red-500) 14%, transparent); color: var(--red-600); }
+
+@media (max-width: 720px) {
+  .seo-app .deep-hbar { grid-template-columns: minmax(0, 1fr) auto; }
+  .seo-app .deep-hbar__track { grid-column: 1 / -1; }
+  .seo-app .deep-method dl { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seo-app .deep-job__spin { animation: none; }
+  .seo-app .deep-job__track span { transition: none; }
+}

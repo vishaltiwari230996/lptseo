@@ -1,0 +1,17 @@
+/* Law Prep Tutorial — Webfonts.
+ *
+ * One family, Geist, at every size, with its own mono sibling for figures.
+ *
+ * This replaced a three-family setup (Poppins display / Plus Jakarta Sans body
+ * / Bodoni Moda brand serif). The serif was the wrong call: a didone is built
+ * for large sizes on a page with air, and most of this product is a 13px data
+ * console, where its thin strokes go spindly and its numerals fight the UI.
+ *
+ * A single grotesque carrying hierarchy on weight, size and tracking is how the
+ * premium end of this category actually sets type, and Geist is that face:
+ * a true variable 100..900, tight apertures, and figures that sit properly in
+ * tabular columns. It also pairs natively with Geist Mono, which this project
+ * was already loading — so the display, body and data faces are now one design,
+ * not three borrowed ones.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@400;500;600&display=swap');

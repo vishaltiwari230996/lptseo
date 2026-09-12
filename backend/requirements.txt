@@ -1,0 +1,28 @@
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic[email]>=2.7
+email-validator>=2.1
+pydantic-settings>=2.3
+langchain>=0.3
+langchain-openai>=0.2
+google-cloud-firestore>=2.16
+google-cloud-storage>=2.17
+httpx>=0.27
+python-multipart>=0.0.9
+PyJWT>=2.8
+google-auth>=2.30
+pypdf>=5.1
+python-docx>=1.1
+svglib>=1.5
+pillow>=10.0
+# Creative Agent — structured layout engine + document reference ingestion.
+reportlab>=4.0          # brochure (PDF) generation
+python-pptx>=0.6.23     # presentation (PPTX) generation
+PyMuPDF>=1.24           # render reference PDF pages for the reference library
+google-api-python-client>=2.130  # Google Drive ingestion for the reference library
+openpyxl>=3.1
+cairosvg           # Element Library — rasterize icon/sticker SVGs (Linux/Cloud Run; optional locally)
+PyYAML>=6.0        # GEO Content Optimizer — opt_config.yaml is the single source of truth for weights
+trafilatura>=2.0   # GEO optimizer Layer 2 — article extraction + boilerplate removal
+numpy>=2.0         # GEO optimizer Layer 4 — embedding similarity/clustering math

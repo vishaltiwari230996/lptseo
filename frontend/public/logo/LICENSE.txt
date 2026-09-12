@@ -1,0 +1,8 @@
+Brand logos in this folder
+==========================
+
+Set:     "SVG Logos" (https://github.com/gilbarbara/logos), via the Iconify API
+License: CC0 1.0 (the SVG files are public domain).
+Note:    HubSpot, Google Workspace and Slack names/logos are trademarks of their
+         respective owners, shown here for nominative use (identifying the
+         integration). No affiliation or endorsement is implied.

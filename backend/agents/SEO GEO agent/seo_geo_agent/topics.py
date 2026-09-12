@@ -1,0 +1,279 @@
+"""Blog topic lab — ranked topic ideas with volume, trend, and difficulty evidence.
+
+Volume is a proxy (our own Search Console impressions where available, interest
+tiers otherwise) because Google does not sell absolute volumes cheaply; the
+ranking only needs relative numbers, and the dashboard labels them estimates.
+"""
+from __future__ import annotations
+
+from . import sources
+from .sources import CredentialMissing, QueryStat
+
+STOPWORDS = {"a", "an", "the", "for", "to", "of", "in", "on", "and", "or", "is", "are", "with", "your", "my"}
+QUESTION_STARTS = ("how", "what", "why", "when", "which", "can", "do", "does", "is", "are", "should")
+WEAK_DOMAINS = ("reddit.com", "quora.com", "forum", "medium.com", "pinterest.", "facebook.com", "youtube.com")
+
+MAX_SEEDS = 5          # Serper calls cost money; 5 seeds + 12 checks ≈ $0.01/run
+MAX_SERP_CHECKS = 12
+MAX_TOPICS = 15
+MAX_LIVE_TOPICS = 10   # avoided (cannibalizing) topics ride along beyond this cap — never hidden
+CANNIBAL_OVERLAP = 0.8
+TREND_SCORE = {"rising": 1.0, "new": 0.7, "flat": 0.5, "falling": 0.2}
+DIFFICULTY_SCORE = {"easy win": 1.0, "medium": 0.6, "hard": 0.25, None: 0.5}
+
+
+def _tokens(text: str) -> set[str]:
+    return {w for w in text.lower().split() if w not in STOPWORDS and len(w) > 2}
+
+
+def _token_overlap(cand: set[str], other: set[str]) -> bool:
+    """True when `cand` is (near-)covered by `other`: a subset, or sharing >=80% of its tokens."""
+    if not cand or not other:
+        return False
+    if cand <= other:
+        return True
+    shared = cand & other
+    return (len(shared) / len(cand)) >= CANNIBAL_OVERLAP
+
+
+def _cannibalized_by(display: str, corpus_pages: list[dict] | None) -> str | None:
+    """Return the URL of a corpus page this candidate would cannibalize, or None."""
+    if not corpus_pages:
+        return None
+    cand = _tokens(display)
+    if not cand:
+        return None
+    for page in corpus_pages:
+        for field in ("target_query", "title"):
+            if _token_overlap(cand, _tokens(page.get(field) or "")):
+                return page.get("url")
+    return None
+
+
+def _match_impressions(candidate: str, rows: list[QueryStat]) -> int:
+    """Impressions of GSC queries that overlap the candidate topic."""
+    cand = _tokens(candidate)
+    if not cand:
+        return 0
+    total = 0
+    for r in rows:
+        q = _tokens(r.query)
+        if cand <= q or (q and q <= cand):
+            total += r.impressions
+    return total
+
+
+def _trend(candidate: str, rows: list[QueryStat], prev_rows: list[QueryStat]) -> str:
+    now = _match_impressions(candidate, rows)
+    prev = _match_impressions(candidate, prev_rows)
+    if now and not prev:
+        return "new"
+    if not now:
+        return "flat"
+    if now >= prev * 1.2:
+        return "rising"
+    if now <= prev * 0.8:
+        return "falling"
+    return "flat"
+
+
+def _impact(angle: str) -> str:
+    """How this topic grows footfall — the reader's 'why bother' in one line."""
+    return {
+        "pricing guide": "Catches buyers comparing costs — bottom-funnel traffic that converts.",
+        "comparison": "Wins people choosing between options — high-intent visits.",
+        "FAQ answer": "Answers real questions — steady search traffic plus AI-answer citations.",
+        "how-to guide": "Builds topical authority — compounds into rankings for the whole cluster.",
+    }[angle]
+
+
+def _angle(candidate: str) -> str:
+    lower = candidate.lower()
+    if lower.startswith(QUESTION_STARTS) or lower.endswith("?"):
+        return "FAQ answer"
+    if " vs " in f" {lower} " or "best " in lower:
+        return "comparison"
+    if any(w in lower for w in ("cost", "price", "pricing", "salary", "rates")):
+        return "pricing guide"
+    return "how-to guide"
+
+
+def _difficulty(serp: dict, own_domain: str) -> tuple[str, list[str]]:
+    evidence = []
+    weak = [r["link"] for r in serp["organic"] if any(w in r["link"].lower() for w in WEAK_DOMAINS)]
+    if any(own_domain in r["link"] for r in serp["organic"][:3]):
+        return "hard", ["we already rank top-3 — write only if refreshing"]
+    if weak:
+        evidence.append(f"{len(weak)} weak result(s) in the top 10 (forums/UGC)")
+    if serp.get("aio_present"):
+        evidence.append("Google shows an AI Overview — strong citation target")
+    if len(weak) >= 3:
+        return "easy win", evidence
+    if len(weak) >= 1:
+        return "medium", evidence
+    return "hard", evidence or ["top 10 is all strong sites"]
+
+
+def _why(volume: int, trend: str, difficulty: str | None, evidence: list[str]) -> str:
+    parts = []
+    if volume:
+        parts.append(f"~{volume:,} impressions/mo already visible to us")
+    trend_text = {"rising": "interest is rising", "new": "newly appearing searches",
+                  "falling": "interest is cooling", "flat": ""}[trend]
+    if trend_text:
+        parts.append(trend_text)
+    if difficulty:
+        parts.append(difficulty if not evidence else f"{difficulty}: {'; '.join(evidence)}")
+    return " · ".join(parts) or "expansion keyword from live Google suggestions"
+
+
+def build_topics(
+    brand: dict,
+    rows: list[QueryStat],
+    prev_rows: list[QueryStat],
+    search=None,
+    max_checks: int = MAX_SERP_CHECKS,
+    corpus_pages: list[dict] | None = None,
+    competitor_topics: list[str] | None = None,
+) -> tuple[list[dict], list[str]]:
+    """Return (ranked topics, degradation notes) for one brand.
+
+    `corpus_pages` (our own crawled/summarised pages) grounds the anti-cannibalization
+    check; `competitor_topics` (flattened hot-topics + recent-post topics from
+    competitor profiles) seeds gap candidates tagged source="competitor-content".
+    Both are optional, offline data — passing neither keeps prior behaviour.
+    """
+    from . import keywords  # lazy: keywords.py imports from this module at load time
+
+    notes: list[str] = []
+    if search is None:
+        if sources.serper_available():
+            search = sources.serper_search
+        else:
+            notes.append("Serper key missing — topics built from Search Console data only")
+
+    # Candidate pool: brand seeds expanded through live Google suggestions, plus
+    # question-shaped queries we already get impressions for but don't rank on.
+    candidates: dict[str, tuple[str, str]] = {}  # normalized -> (display, source)
+
+    def add(cand: str, source: str) -> None:
+        text = " ".join(cand.split()).strip("?. ").strip()
+        if 8 <= len(text) <= 90:
+            candidates.setdefault(text.lower(), (text, source))
+
+    seed_serps: dict[str, dict] = {}
+    for seed in [s for s in brand.get("seeds", []) if s.strip()][:MAX_SEEDS]:
+        add(seed, "seed")
+        if search:
+            try:
+                serp = search(seed)
+                seed_serps[seed.lower()] = serp
+                for cand in serp["related"] + serp["paa"]:
+                    add(cand, "google suggestion")
+            except CredentialMissing as exc:
+                notes.append(f"Serper: {exc}")
+                search = None
+    for r in rows:
+        if r.query.lower().startswith(QUESTION_STARTS) and r.impressions >= 50 and r.position > 10:
+            add(r.query, "search data")
+
+    # Fresh ideation: topics the brand does NOT already touch — new ground, not
+    # a rearrangement of what the site/searches surfaced.
+    try:
+        ideas = sources.llm_json(
+            "You are a content strategist. Answer with a JSON array of strings only.",
+            f"Suggest 12 NEW blog topics (plain keyword phrases, not clickbait titles) that would bring "
+            f"qualified visitors to {brand.get('name', brand['domain'])} ({brand['domain']}). Avoid anything "
+            f"close to these existing candidates: {list(candidates.values())[:40]}. Mix buyer-intent and "
+            f"question topics.",
+        )
+        if isinstance(ideas, list):
+            for idea in ideas:
+                if isinstance(idea, str):
+                    add(idea, "new idea")
+    except CredentialMissing as exc:
+        notes.append(f"New-topic ideation skipped: {exc}")
+
+    # Competitor gaps: topics rivals cover that we don't yet — from Task 5's
+    # competitor-profiles doc (hot_topics + recent-post topics, flattened by the caller).
+    for topic in competitor_topics or []:
+        if isinstance(topic, str) and topic.strip():
+            add(topic, "competitor-content")
+
+    # Score every candidate on volume proxy + trend; SERP-check only the top few.
+    scored = []
+    for key, (display, source) in candidates.items():
+        volume = _match_impressions(display, rows)
+        scored.append((volume, key, display, source))
+    scored.sort(reverse=True)
+
+    topics: list[dict] = []
+    checks = 0
+    max_volume = max((v for v, _, _, _ in scored), default=0)
+    for volume, key, display, source in scored[: MAX_TOPICS * 2]:
+        trend = _trend(display, rows, prev_rows)
+        difficulty: str | None = None
+        evidence: list[str] = []
+        serp = seed_serps.get(key)
+        if search and serp is None and checks < max_checks:
+            try:
+                serp = search(display)
+                checks += 1
+            except CredentialMissing as exc:
+                notes.append(f"Serper: {exc}")
+                search = None
+        if serp:
+            difficulty, evidence = _difficulty(serp, brand["domain"])
+        score = (
+            0.4 * DIFFICULTY_SCORE[difficulty]
+            + 0.35 * TREND_SCORE[trend]
+            + 0.25 * (volume / max_volume if max_volume else 0.3)
+        )
+        if source == "seed":
+            score -= 0.08  # the lab's job is discovery — the user already knows their seeds
+        angle = _angle(display)
+        avoided_url = _cannibalized_by(display, corpus_pages)
+        topics.append({
+            "keyword": display,
+            "source": source,
+            "impact": _impact(angle),
+            "angle": angle,
+            "intent": keywords.intent_of(display),
+            "volume_est": volume or None,
+            "volume_label": f"~{volume:,}/mo (our impressions)" if volume else "interest signal only",
+            "trend": trend,
+            "difficulty": difficulty,
+            "est_monthly_clicks": round(volume * 0.11) if volume else None,
+            "why": _why(volume, trend, difficulty, evidence),
+            "score": round(score, 3),
+            "avoided": bool(avoided_url),
+            "avoided_reason": f"overlaps {avoided_url}" if avoided_url else None,
+        })
+
+    # Competitor-content candidates are a gap signal, not a mandate — never let
+    # one outrank what the brand itself told us to prioritize (its seeds).
+    seed_scores = [t["score"] for t in topics if t["source"] == "seed"]
+    if seed_scores:
+        seed_floor = min(seed_scores)
+        # Clamped topics still need relative order among themselves — step each
+        # one down a notch further than the last, ranked by its pre-clamp score,
+        # so a batch of gap topics doesn't all collapse to one identical value.
+        to_clamp = sorted(
+            (t for t in topics if t["source"] == "competitor-content" and t["score"] >= seed_floor),
+            key=lambda t: t["score"], reverse=True,
+        )
+        for i, t in enumerate(to_clamp):
+            t["score"] = round(seed_floor - 0.001 - i * 0.001, 3)
+
+    # Priority is a display label derived from score — compute it last, after the
+    # competitor clamp above has had its final say, so a clamped topic never shows
+    # a priority earned by its pre-clamp score.
+    for t in topics:
+        s = t["score"]
+        t["priority"] = "high" if s >= 0.62 else "medium" if s >= 0.45 else "low"
+
+    # Avoided (cannibalizing) topics are never hidden (a9 rule) but always sort
+    # after live ones, and only live topics count against the display cap.
+    live = sorted((t for t in topics if not t["avoided"]), key=lambda t: t["score"], reverse=True)
+    avoided = sorted((t for t in topics if t["avoided"]), key=lambda t: t["score"], reverse=True)
+    return live[:MAX_LIVE_TOPICS] + avoided, notes

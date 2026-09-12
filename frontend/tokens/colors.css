@@ -1,0 +1,271 @@
+/* Law Prep Tutorial — Color tokens
+   Ink #03080a · Cloud #fcfcfe · LPT Red #d42a26 (light primary) · LPT Yellow #ffe000 (dark primary)
+   Coral #ff6849 · Royal #035ade. Flat surfaces; elevation via 1px alpha borders.
+   Interaction states are the SAME hue at fixed alpha stops (05/08/0a/14/20/30/70/b0/e0).
+
+   The brand pair is taken from lawpreptutorial.com's own logo, which is pure
+   #ff0000 on pure #ffff00. Neither survives contact with a UI unchanged:
+   white text on #ff0000 is 4.00:1 (fails AA), and #ffff00 is unusable as a
+   light-theme fill. So the identity keeps the pure pair — see --lpt-red /
+   --lpt-yellow below, which the logo mark uses and nothing else does — while
+   the interface uses two tuned members of the same families:
+
+     #d42a26  light primary. White text 5.05:1 (AA at any size). The site's own
+              CTA red, #e0332f, sits one stop lighter at 4.48:1 and misses AA
+              for body-size text, so it is kept as --blue-500 / --brand-light.
+     #ffe000  dark primary. 15.26:1 on ink, and ink text on it is the same, so
+              a filled button and its label are both comfortable.
+
+   This mirrors the structure the file already had — a light-theme primary
+   swapped for a bright one on ink — with red/yellow in place of grape/volt. */
+:root {
+  color-scheme: light;
+
+  /* ---- Neutral scale (ink-alpha ramp; legacy keys preserved) ---- */
+  --gray-0:   #FFFFFF;
+  --gray-25:  #fcfcfe;   /* cloud */
+  --gray-50:  #03080a05;
+  --gray-100: #03080a08;
+  --gray-150: #03080a0a;
+  --gray-200: #03080a14;
+  --gray-300: #03080a20;
+  --gray-400: #03080a30;
+  --gray-500: #03080a70;
+  --gray-600: #03080ab0;
+  --gray-700: #03080ac9;
+  --gray-800: #03080ae0;
+  --gray-900: #03080a;
+  --ink:      #03080a;
+
+  /* ---- Warm neutral (coral-subtle; replaces cream) ---- */
+  --cream-50: #ff684905;
+  --cream-100:#ff684908;
+  --cream-200:#ff684914;
+
+  /* ---- Brand ramp (LPT red; legacy --blue-* keys preserved) ---- */
+  --blue-50:  #d42a2608;
+  --blue-100: #d42a2614;
+  --blue-200: #d42a2620;
+  --blue-300: #eb9b99;
+  --blue-400: #e0706d;
+  --blue-500: #e0332f;   /* the site's own CTA red */
+  --blue-600: #d42a26;   /* LPT red — brand main */
+  --blue-700: #d42a26;
+  --blue-800: #b01f1c;
+  --blue-900: #4a0c0a;
+
+  /* ---- Logo constants ----
+     The mark is fixed identity, not a themed accent: the same two swatches on
+     cloud and on ink, so they are declared once here and deliberately NOT
+     overridden in the dark block below.
+
+     These are the logo's literal colours — pure red on pure yellow, straight
+     off lawpreptutorial.com's wordmark. They belong to the mark and to nothing
+     else; every other surface uses the tuned ramp above. Do not reach for
+     --lpt-yellow as a highlight: at 1.07:1 on white it is invisible as
+     anything but a fill. ---- */
+  --lpt-red:    #ff0000;
+  --lpt-yellow: #ffff00;
+
+  /* ---- Accent ramp (royal blue) ---- */
+  --accent-50:  #035ade08;
+  --accent-100: #035ade14;
+  --accent-200: #035ade20;
+  --accent-400: #4d8dff;
+  --accent-500: #035ade;
+  --accent-600: #0352c9;
+  --accent-700: #0348b0;
+
+  /* ---- Semantic status ---- */
+  --green-50:  #00bf6f14;
+  --green-500: #00bf6f;
+  --green-600: #007544;
+  --amber-50:  #e5a00014;
+  --amber-500: #e5a000;
+  --amber-600: #8a6000;
+  --red-50:    #ff2d5514;
+  --red-500:   #ff2d55;
+  --red-600:   #bf0024;
+
+  /* ---- Gradients — flattened (kept as vars for background-image consumers) ---- */
+  --grad-brand:      linear-gradient(135deg, #d42a26 0%, #d42a26 100%); /* @kind color */
+  --grad-brand-soft: linear-gradient(135deg, #d42a2614 0%, #fcfcfe 100%); /* @kind color */
+  /* The duo is now the brand's own pair, red into yellow, rather than two
+     unrelated hues. */
+  --grad-duo:        linear-gradient(135deg, #d42a26 0%, #ffe000 100%); /* @kind color */
+  --grad-accent:     linear-gradient(135deg, #035ade 0%, #035ade 100%); /* @kind color */
+  --grad-warm:       linear-gradient(135deg, #ff684914 0%, #ff6849 100%); /* @kind color */
+  --grad-hero:       radial-gradient(120% 90% at 85% 0%, #d42a2608 0%, #fcfcfe 60%, #ffffff 100%); /* @kind color */
+
+  /* ---- Category palette (workstreams) ---- */
+  --cat-design-bg:   #7624f414;  --cat-design:   #7624f4;
+  --cat-seo-bg:      #00bf6f14;  --cat-seo:      #007544;
+  --cat-copy-bg:     #ff684914;  --cat-copy:     #bf3d20;
+  --cat-social-bg:   #ff2d5514;  --cat-social:   #bf0024;
+  --cat-ads-bg:      #035ade14;  --cat-ads:      #0352c9;
+  --cat-data-bg:     #ffab0014;  --cat-data:     #8a6000;
+
+  /* =========================================================
+     Semantic aliases — reference these in components & kits
+     ========================================================= */
+  --bg-app:          #fcfcfe;
+  --surface:         #ffffff;
+  --surface-card:    #ffffff;
+  --surface-sunken:  #03080a05;
+  --surface-hover:   #03080a08;
+  --surface-active:  #03080a14;
+  --surface-warm:    #ff684908;
+
+  --border-subtle:   #03080a14;
+  --border:          #03080a20;
+  --border-strong:   #03080a30;
+
+  --text-primary:    #03080a;
+  --text-secondary:  #03080ab0;
+  --text-tertiary:   #03080a70;
+  --text-disabled:   #03080a4d;
+  --text-inverse:    #fcfcfe;
+  --text-link:       #d42a26;
+
+  --brand:           #d42a26;
+  --brand-hover:     #d42a26e0;
+  --brand-active:    #b01f1c;
+  --brand-light:     #e0332f;
+  --brand-subtle:    #d42a2608;
+  --brand-bg:        #d42a2614;
+  --brand-border:    #d42a2620;
+  --on-brand:        #fcfcfe;
+
+  --action:          #d42a26;
+  --action-hover:    #d42a26e0;
+  --action-active:   #b01f1c;
+  --on-action:       #fcfcfe;
+
+  --accent:          #035ade;
+  --accent-hover:    #0352c9;
+  --accent-active:   #0348b0;
+  --accent-subtle:   #035ade14;
+  --on-accent:       #fcfcfe;
+
+  --focus-ring:      #03080a0f;
+
+  --success:         #00bf6f;
+  --success-bg:      #00bf6f14;
+  --warning:         #e5a000;
+  --warning-bg:      #e5a00014;
+  --danger:          #ff2d55;
+  --danger-hover:    #d91f47;
+  --danger-bg:       #ff2d5514;
+
+  /* Frosted-glass finish — used by identity cards and elevated panels */
+  --dot-grid:        transparent;
+  --glass:           rgba(255, 255, 255, 0.66);
+  --glass-strong:    rgba(255, 255, 255, 0.78);
+  --glass-blur:      saturate(160%) blur(14px);
+  --glass-edge:      inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+/* =========================================================
+   Dark theme — ink canvas, LPT-yellow primary, cloud-alpha neutrals.
+   Set `data-theme="dark"` on <html>; light is the default.
+   ========================================================= */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --gray-0:   #0b1013;
+  --gray-25:  #03080a;
+  --gray-50:  #fcfcfe05;
+  --gray-100: #fcfcfe08;
+  --gray-150: #fcfcfe0a;
+  --gray-200: #fcfcfe14;
+  --gray-300: #fcfcfe20;
+  --gray-400: #fcfcfe30;
+  --gray-500: #fcfcfe70;
+  --gray-600: #fcfcfeb0;
+  --gray-700: #fcfcfec9;
+  --gray-800: #fcfcfee0;
+  --gray-900: #fcfcfe;
+  --ink:      #fcfcfe;
+
+  --blue-50:  #ffe00008;
+  --blue-100: #ffe00014;
+  --blue-200: #ffe00020;
+  --blue-300: #fff07a;
+  --blue-400: #ffe94d;
+  --blue-500: #ffe000;
+  --blue-600: #ffe000;   /* LPT yellow — brand main in dark */
+  --blue-700: #ffe000;
+  --blue-800: #d4bb00;
+  --blue-900: #3a3300;
+
+  --accent-400: #4d8dff;
+
+  /* Status text brightened for readability on ink (chips, badges) */
+  --green-600: #3dd68c;
+  --amber-600: #ffab00;
+  --red-600:   #ff5c7f;
+
+  --grad-brand:      linear-gradient(135deg, #ffe000 0%, #ffe000 100%);
+  --grad-brand-soft: linear-gradient(135deg, #ffe00014 0%, #03080a 100%);
+  --grad-duo:        linear-gradient(135deg, #d42a26 0%, #ffe000 100%);
+  --grad-warm:       linear-gradient(135deg, #ff684914 0%, #ff6849 100%);
+  --grad-hero:       radial-gradient(120% 90% at 85% 0%, #ffe00005 0%, #03080a 60%, #03080a 100%);
+
+  --cat-design-bg:   #7624f420;  --cat-design:   #baa7ff;
+  --cat-seo-bg:      #00bf6f14;  --cat-seo:      #3dd68c;
+  --cat-copy-bg:     #ff684914;  --cat-copy:     #ff8c70;
+  --cat-social-bg:   #ff2d5514;  --cat-social:   #ff5c7f;
+  --cat-ads-bg:      #035ade20;  --cat-ads:      #4d8dff;
+  --cat-data-bg:     #ffab0014;  --cat-data:     #ffab00;
+
+  --bg-app:          #03080a;
+  --surface:         #0b1013;
+  --surface-card:    #0b1013;
+  --surface-sunken:  #03080a;
+  --surface-hover:   #fcfcfe0a;
+  --surface-active:  #fcfcfe14;
+  --surface-warm:    #ff684908;
+
+  --border-subtle:   #fcfcfe14;
+  --border:          #fcfcfe20;
+  --border-strong:   #fcfcfe30;
+
+  --text-primary:    #fcfcfe;
+  --text-secondary:  #fcfcfeb0;
+  --text-tertiary:   #fcfcfe70;
+  --text-disabled:   #fcfcfe4d;
+  --text-inverse:    #03080a;
+  --text-link:       #ffe000;
+
+  --brand:           #ffe000;
+  --brand-hover:     #ffe000e0;
+  --brand-active:    #d4bb00;
+  --brand-light:     #ffe94d;
+  --brand-subtle:    #ffe00008;
+  --brand-bg:        #ffe00014;
+  --brand-border:    #ffe00020;
+  --on-brand:        #03080a;
+
+  --action:          #ffe000;
+  --action-hover:    #ffe000e0;
+  --action-active:   #d4bb00;
+  --on-action:       #03080a;
+
+  --accent:          #4d8dff;
+  --accent-hover:    #7fabff;
+  --accent-active:   #035ade;
+  --accent-subtle:   #035ade20;
+  --on-accent:       #03080a;
+
+  --focus-ring:      #fcfcfe0f;
+
+  --success-bg:      #00bf6f14;
+  --warning-bg:      #e5a00014;
+  --danger-bg:       #ff2d5514;
+
+  --dot-grid:        transparent;
+  --glass:           rgba(252, 252, 254, 0.04);
+  --glass-strong:    rgba(252, 252, 254, 0.07);
+  --glass-blur:      saturate(140%) blur(14px);
+  --glass-edge:      inset 0 1px 0 rgba(252, 252, 254, 0.07);
+}

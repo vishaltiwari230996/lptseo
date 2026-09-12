@@ -1,0 +1,536 @@
+/* What the live console needs that the prototype did not.
+ *
+ * `agenthub.css` is kept byte-for-byte as it came from the prototype, so a rule
+ * changed there can be pasted straight back over it. Everything in this file is
+ * a consequence of the panels now being fed by a network instead of by a
+ * literal: a request can be in flight, can come back empty, and can fail — three
+ * states a fixed dataset never has. It uses the prototype's own tokens, so it
+ * reads as the same system rather than a layer bolted on top.
+ */
+
+/* ---------- toasts: the prototype had one voice, this one needs three ------ */
+
+.toasts {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+/* The base toast keeps the prototype's geometry; only `position` and the layout
+   it sits in change, because a stack cannot have four fixed elements at one
+   coordinate. */
+.toasts .toast {
+  position: static;
+  left: auto;
+  bottom: auto;
+  transform: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(560px, calc(100vw - 32px));
+  pointer-events: auto;
+}
+
+.toast__ic { width: 15px; height: 15px; flex: 0 0 auto; }
+
+.toast--warn { background: var(--mark); color: var(--mark-ink); }
+.toast--error { background: var(--gap); color: var(--gap-ink); }
+
+.toast__x {
+  margin-left: 4px;
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: var(--r-pill);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.85;
+}
+.toast__x:hover { opacity: 1; }
+
+/* ---------- the three states a fetched panel has and a fixed one does not -- */
+
+/* Loading is not emptiness. A panel that says "no brands yet" while its request
+   is still in flight tells the reader their data is gone; this says the true
+   thing instead, and says it in the shape the content will arrive in. */
+.wait {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 2px;
+  color: var(--fg-3);
+  font-size: 13px;
+}
+
+.wait__spin {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  border: 2px solid var(--rule-hard);
+  border-top-color: var(--fg-2);
+  border-radius: 50%;
+  animation: hub-spin 700ms linear infinite;
+}
+
+@keyframes hub-spin { to { transform: rotate(360deg); } }
+
+/* Skeleton rows, for a panel whose shape is known before its content is. */
+.wait__rows { display: flex; flex-direction: column; gap: 8px; padding: 4px 0; }
+.wait__row {
+  height: 46px;
+  border-radius: var(--r-cell);
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--rule-soft) 50%, var(--surface-2) 100%);
+  background-size: 220% 100%;
+  animation: hub-sheen 1.4s var(--ease) infinite;
+}
+@keyframes hub-sheen { to { background-position: -120% 0; } }
+
+/* Nothing here yet, and that is the true answer — not a failure. */
+.blank {
+  padding: 26px 2px;
+  color: var(--fg-2);
+  font-size: 13px;
+  max-width: 60ch;
+}
+.blank b { display: block; margin-bottom: 4px; color: var(--fg); font-size: 14px; font-weight: 700; }
+.blank p { margin: 0 0 12px; color: var(--fg-3); }
+
+/* We never found out. Distinct from empty on purpose: the reader is being told
+   the request failed, not that the shop did no work. */
+.oops {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--gap);
+  border-left-width: 3px;
+  border-radius: var(--r-card);
+  background: var(--gap-soft);
+  color: var(--fg);
+  font-size: 13px;
+  max-width: 72ch;
+}
+.oops b { display: block; margin-bottom: 2px; font-weight: 700; }
+.oops p { margin: 0; color: var(--fg-2); }
+.oops__act { margin-top: 10px; }
+
+/* A figure the backend has no endpoint for yet is written as a dash with a
+   reason on hover — never as a number, and never as a zero. */
+.unknown {
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+  border-bottom: 1px dotted var(--rule-hard);
+}
+
+/* ---------- transitional: panels not yet ported ---------------------------
+   The old console's stylesheets and this one agree on every class name but one
+   variable, `--surface`, which `agenthub.css` redefines globally. A panel still
+   running on the old markup gets the old value pinned back inside this wrapper,
+   so nothing shifts underneath it while it waits its turn. Deleted with the
+   last old panel. */
+
+.legacy { --surface: #ffffff; }
+[data-theme="dark"] .legacy { --surface: #0b1013; }
+.legacy { height: 100%; min-height: 0; }
+
+/* ---------- the moment before the console knows who you are --------------- */
+
+.boot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.boot__spin {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--rule-hard);
+  border-top-color: var(--mark);
+  border-radius: 50%;
+  animation: hub-spin 700ms linear infinite;
+}
+
+/* ---------- what a saved setting says about itself ------------------------
+   A select that saves on change needs to say what it is now following, or the
+   reader cannot tell an explicit choice from an inherited one. */
+
+.srow__eff {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--fg-3);
+}
+
+/* ---------- the closing row of the compose block --------------------------
+   `.compose__else` was written for [ text field | one button ]. The two live
+   specialists that take a written brief get that field in the brief dialog
+   instead, so the left cell carries the sentence and the right carries both
+   actions. */
+
+.compose__hint { margin: 0; font-size: 12px; color: var(--fg-3); }
+.compose__acts { display: flex; gap: var(--s2); align-items: center; }
+
+/* An artifact being fetched with the caller's token, in the space the picture
+   will occupy. */
+.shot__wait {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 180px;
+  color: var(--fg-3);
+  font-size: 12px;
+}
+
+/* ---------- GEO: what the live workspace needs on top of the prototype ----
+   The prototype's answers were single paragraphs of authored prose. Real engine
+   answers are markdown — headings, lists, links and citation markers — so the
+   block below gives those the same measure and rhythm `.ans p` already sets,
+   rather than pulling in the old console's `.geo-md` rules, which are built on
+   the previous design system's tokens. */
+
+.geo .ans__text > :first-child { margin-top: 0; }
+.geo .ans__text > :last-child { margin-bottom: 0; }
+.geo .ans__text p {
+  margin: 0 0 10px;
+  max-width: 72ch;
+  font-size: 15px;
+  line-height: 1.6;
+  letter-spacing: -0.011em;
+  overflow-wrap: anywhere;
+}
+.geo .ans__text h4 { margin: 14px 0 6px; font-size: 13px; font-weight: 700; }
+.geo .ans__text ul, .geo .ans__text ol { margin: 0 0 10px; padding-left: 20px; max-width: 72ch; }
+.geo .ans__text li { margin: 4px 0; font-size: 15px; line-height: 1.55; }
+.geo .ans__text strong { font-weight: 700; }
+.geo .ans__text a { color: inherit; text-underline-offset: 2px; }
+.geo-md__cite { font-size: 10px; color: var(--fg-3); letter-spacing: 0.02em; margin-left: 1px; }
+
+/* An engine that did not answer, or had nothing to answer in. Neither is a
+   miss, and neither may be drawn like one. */
+.geo .ans__err {
+  margin: 0;
+  max-width: 72ch;
+  font-size: 13px;
+  color: var(--fg-3);
+  font-style: italic;
+}
+
+.geo .ans__cites { margin: 10px 0 0; font-size: 11px; color: var(--fg-3); }
+.geo .ans__cites a { color: inherit; }
+
+/* A cell for an engine that was never asked. An absence of measurement is not
+   an absence of the brand, so it is not drawn as a miss. */
+.geo .cell.is-blank {
+  border-style: dashed;
+  opacity: 0.45;
+}
+
+/* The plan's per-action steps. */
+.pjob__steps { margin: 6px 0 4px; padding-left: 18px; }
+.pjob__steps li { font-size: 12px; color: var(--fg-2); line-height: 1.5; margin: 2px 0; }
+
+/* A button that reads as a link, for reopening a stored analysis. */
+.linky {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* A check measured on far fewer answers than the rest of the series. Real, and
+   said so rather than dropped. */
+.readout__warn { display: block; color: var(--proxy); font-weight: 650; }
+
+/* A table an engine wrote, inside its answer. Scrolls in its own box: a wide
+   comparison must never make the page itself scroll sideways. */
+.geo .ans__tw, .geo-md__tw { overflow-x: auto; margin: 0 0 12px; max-width: 72ch; }
+.geo .ans__table, .geo-md__table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.geo .ans__table th, .geo .ans__table td,
+.geo-md__table th, .geo-md__table td {
+  border-bottom: 1px solid var(--rule);
+  padding: 6px 12px 6px 0;
+  text-align: left;
+  vertical-align: top;
+}
+.geo .ans__table th, .geo-md__table th {
+  border-bottom-color: var(--fg);
+  font-size: 10px;
+  font-stretch: 76%;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  white-space: nowrap;
+}
+
+/* ---------- a collision inside the prototype's own stylesheet -------------
+   `agenthub.css` declares `.flag` twice and unscoped: once at its Marketing
+   Research block as a three-column row, and again at its GEO block as an inline
+   chip. The GEO rule comes later, so it wins for both — Marketing Research's
+   flag rows render as overlapping inline chips.
+
+   That file is kept byte-for-byte so a change in the prototype can be pasted
+   straight back over it, so the fix belongs here. The selector is scoped to the
+   list the rows actually live in, which is unambiguous: a GEO chip is never a
+   child of `.flags`. */
+
+.flags > .flag {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr) 150px;
+  gap: var(--s4);
+  align-items: start;
+  padding: var(--s4) 6px;
+  border: 0;
+  border-bottom: 1px solid var(--rule);
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font-size: inherit;
+  white-space: normal;
+}
+.flags--tight > .flag { grid-template-columns: 62px minmax(0, 1fr) 132px; padding: var(--s3) 0; }
+.flags > .flag:last-child { border-bottom: 0; }
+
+@media (max-width: 900px) {
+  .flags > .flag, .flags--tight > .flag { grid-template-columns: 62px minmax(0, 1fr); }
+}
+
+/* ---------- what live measurement added that the prototype never drew ------
+   Each rule below shadows one in `agenthub.css` — same selector, later import,
+   so it wins without a specificity race — or names a class the prototype has
+   no rule for at all. */
+
+/* The ledger was drawn for four engines; the live sweep asks five (AI Overview
+   and AI Mode are separate engines). At four declared columns the chevron takes
+   the fifth track and wraps. Mirrors agenthub.css's pair of rules — the base
+   grid and its 560px variant, where the chevron column is dropped. */
+.geo .lhead, .geo .lrow__btn {
+  grid-template-columns: minmax(0, 1fr) repeat(5, 46px) 22px;
+}
+@media (max-width: 560px) {
+  .geo .lhead, .geo .lrow__btn { grid-template-columns: minmax(0, 1fr) repeat(5, 30px); }
+}
+
+/* `--surface-3` used to be supplied here. It lives in `hub-theme.css` now,
+   beside the rest of the palette and with a value measured against the text it
+   carries — two definitions of one token, the later winning with the unmeasured
+   value, is how the dark chip ended up at 4.1:1. */
+
+/* A high-severity row on Home and the Issues panel must not render identically
+   to a routine one. */
+.prio__i.is-bad { box-shadow: inset 3px 0 0 var(--gap); background: var(--gap-soft); }
+
+/* Page check: pros and cons are one comparison, so they sit side by side until
+   the viewport says otherwise. */
+.geo .procon { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 var(--s6); }
+@media (max-width: 900px) {
+  .geo .procon { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Weekly delta labels on the Trend chart: direction is the datum. */
+.geo .plot .wk-delta.is-up { fill: var(--live); }
+.geo .plot .wk-delta.is-down { fill: var(--gap); }
+
+/* The Errors cell in the run ledger, only when there are errors to report. */
+.geo .tbl .num.is-bad { color: var(--gap); font-weight: 650; }
+
+/* Question-list rows carry sentences, not labels, so they get a measure. */
+.geo .listy .row-text { font-size: 13px; line-height: 1.45; }
+
+/* A persona select does not deserve the full flex share a question input gets.
+   Shadows `.geo .inline .field`'s 280px basis. */
+.geo .inline .field--tight { flex: 0 1 220px; }
+
+/* The prototype's `.field` only ever held an `.inp`; a textarea must fill the
+   same width. */
+.field textarea { width: 100%; }
+
+/* The assignee input inside a plan action: a name, not a paragraph. */
+.pjob__assign { max-width: 200px; font-size: 12px; padding: 5px 8px; }
+
+/* The persona chip inside a ledger question reads as a chip, not stray caps. */
+.geo .lrow__q .tag { border: 1px solid var(--rule-hard); border-radius: var(--r-cell); padding: 1px 5px; }
+
+/* ---------- Schedule: what a cron row needs that a service row did not ----
+   The rows themselves reuse Integrations' `.hook` system verbatim. These are
+   only the additions: a quiet note under the status tag (Integrations spelled
+   this inline; a class so the next panel does not copy a style attribute), and
+   a fold of registry facts spanning the full row. */
+
+.hook__note { display: block; font-size: 11px; color: var(--fg-3); }
+
+/* The fold is a grid item spanning every column of its `.hook`, so the row's
+   own bottom border stays the separator between jobs and the fold's top border
+   separates the row from its detail. */
+.cronfold {
+  grid-column: 1 / -1;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule);
+}
+.cronfold dl { margin: 0; display: grid; row-gap: 6px; }
+.cronfold dl > div { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 2px var(--s4); }
+.cronfold dt {
+  font-size: 10px;
+  font-stretch: 76%;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.cronfold dd { grid-column: 2; margin: 0; font-size: 12px; color: var(--fg-2); line-height: 1.5; }
+.cronfold code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: var(--r-cell);
+}
+.cronfold__note { margin: 10px 0 0; font-size: 12px; color: var(--fg-3); }
+
+@media (max-width: 560px) {
+  .cronfold dl > div { grid-template-columns: minmax(0, 1fr); }
+  .cronfold dd { grid-column: auto; }
+}
+
+
+/* ---------- GEO: five engines, not four ----------------------------------
+   `.strip4` is the prototype's four-across grid and two other panels still use
+   it for four things. GEO's engine strip has had five since Google's AI Mode
+   started answering, and the fifth was wrapping onto a second row at a quarter
+   width. The prototype sheet stays byte-identical, so the count that changed is
+   overridden here rather than edited there — including inside its two
+   breakpoints, which this file would otherwise beat on source order alone and
+   leave five columns on a phone. */
+
+.geo .strip4--five { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+
+@media (max-width: 1180px) {
+  .geo .strip4--five { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .geo .strip4--five { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* How many answers an engine was asked for, and why that is not the number
+   beside it. Quieter than the rate's own line: it explains the measurement
+   rather than being one. Paused takes the same amber the proxy chips use —
+   usable data with a caveat, never an alarm. */
+.geo .strip4 .cover {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--fg-3);
+}
+.geo .strip4 .cover.is-paused { color: var(--proxy); }
+
+/* ---------- GEO: the brand list -------------------------------------------
+   The rows are the prototype's own setting rows (`.rows` / `.srow`), because
+   that is exactly what each one is: a label and its consequence on the left, the
+   control that changes it on the right. Only three things are added here.
+
+   `.sw` was drawn in the prototype as a static span. The scheduled check is the
+   first place it has to be pressed, so the element under it becomes a real
+   `role="switch"` button and these rules strip the browser's button chrome back
+   off it — the look is still the prototype's, and the keyboard behaviour is the
+   one a control needs. */
+
+.geo button.sw {
+  -webkit-appearance: none;
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.geo button.sw:disabled { cursor: not-allowed; opacity: 0.55; }
+
+/* The control cell carries a switch and one or two small buttons, and on a
+   narrow window they wrap rather than push the row wider. */
+.geo .brow__c { display: flex; align-items: center; justify-content: flex-end; gap: var(--s3); flex-wrap: wrap; }
+
+/* A removal waiting to be confirmed, inside the row it would remove. It takes
+   the alarm colour because it is the one moment on this screen where pressing
+   again changes what four other agents can see — and it disappears the instant
+   the answer is given, so nothing is left shouting. */
+.geo .brow__ask {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.45;
+  color: var(--gap);
+}
+
+/* The brand that was just added, kept on screen after its toast has gone. It
+   takes the marigold edge the console uses for "this is the thing you are
+   looking at" rather than the empty-state grey — what it reports is a result,
+   and its job is to hand over the next step while the reader is still here. */
+.geo .brow__made {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--mark-line);
+  border-radius: var(--r-card);
+  background: var(--mark-row);
+  max-width: 72ch;
+}
+.geo .brow__made b { display: block; margin-bottom: 4px; font-size: 13px; font-weight: 700; }
+.geo .brow__made p { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--fg-2); }
+
+/* At the width where `.srow` stacks and its control cell stretches, the
+   controls belong under the sentence they change, not pinned to the far edge
+   of it. Matches `agenthub.css`'s own 760px stacking rule for these rows. */
+@media (max-width: 760px) {
+  .geo .brow__c { justify-content: flex-start; }
+}
+
+/* ---------- Marketing Research: the board report --------------------------
+ *
+ * Two period selects, a button, and the one thing the document itself cannot
+ * say: how much of the board this pull was able to answer. Nothing here is a
+ * new visual language — the controls are the prototype's `.field`/`.sel` pair
+ * and the coverage block is its `.rep__s` prose with a disclosure under it.
+ */
+
+.brd { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--s4); }
+.brd .field { margin-bottom: 0; }
+.brd .sel { min-width: 220px; }
+
+/* The fill count. Deliberately a sentence and not a gauge: "13 of 38" is a
+   fact about the capture on file, and drawing it as a third-full bar invites
+   the reading this whole block exists to prevent — that the period itself was
+   thin. */
+.cov { margin-top: var(--s4); padding-top: var(--s4); border-top: 1px solid var(--rule); }
+.cov:first-of-type { margin-top: 0; padding-top: 0; border-top: 0; }
+.cov__n { margin: 0; font-size: 13px; font-weight: 650; display: flex; align-items: baseline; gap: var(--s3); }
+.cov__n b { font-size: 15px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.cov__w { margin: 5px 0 0; font-size: 12px; line-height: 1.55; color: var(--fg-2); max-width: 70ch; }
+
+.cov__miss { margin: var(--s3) 0 0; padding-left: var(--s4); max-width: 78ch; }
+.cov__miss li { margin: 4px 0; font-size: 12px; line-height: 1.5; color: var(--fg-2); }
+.cov__miss li b { font-weight: 700; color: var(--fg); }
+.cov__miss li em { font-style: normal; color: var(--fg-3); }

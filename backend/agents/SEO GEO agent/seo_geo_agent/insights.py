@@ -1,0 +1,586 @@
+"""Per-brand SEO insights + to-do list where every item has an estimated traffic gain.
+
+The estimate model is deliberately simple and honest: a public CTR-by-position
+curve applied to the query's own impressions. Every number the dashboard shows
+is labelled an estimate; the goal is ranking the work, not forecasting revenue.
+"""
+from __future__ import annotations
+
+import hashlib
+import re
+from datetime import date, timedelta
+
+from . import competitors, gsc_oauth, pages as pages_mod, site_brain, state, topics
+from .sources import (
+    CredentialMissing,
+    QueryStat,
+    ga_discover_property,
+    ga_fetch_overview,
+    ga_fetch_pages,
+    gsc_fetch,
+)
+
+# Aggregate organic CTR by position (rounded from public CTR studies). Position
+# 11+ uses the flat tail — precision there doesn't change any ranking decision.
+CTR_BY_POS = {1: 0.28, 2: 0.15, 3: 0.11, 4: 0.08, 5: 0.069, 6: 0.052, 7: 0.041, 8: 0.032, 9: 0.027, 10: 0.023}
+TAIL_CTR = 0.015
+
+MIN_IMPRESSIONS = 100          # ignore queries too small to move the needle
+DECAY_DROP = 0.30              # a page is "decaying" when clicks fall 30%+
+MAX_TODOS = 25                 # dashboard shows work, not a data dump
+
+DEFAULT_BRANDS = [
+    {
+        "id": "lawpreptutorial",
+        "name": "Law Prep Tutorial",
+        "domain": "lawpreptutorial.com",
+        "gsc_property": "sc-domain:lawpreptutorial.com",
+        # The two exam families the business is actually built on — law
+        # entrance (CLAT and the other NLU tests) and state judiciary.
+        "seeds": ["clat coaching", "judiciary exam preparation"],
+        "enabled": True,
+    }
+]
+
+
+def ctr_at(position: float) -> float:
+    return CTR_BY_POS.get(max(1, round(position)), TAIL_CTR)
+
+
+# ------------------------------- brand registry -------------------------------
+#
+# ONE Firestore document, ``seo_geo/brands``, holding the whole list — read by
+# a2, a9 (Blog Writer), a10 (GEO) and the Issues rail. It is not per-tenant, and
+# the tenancy ledger records that at
+# ``app/routers/tests/test_route_tenancy_conformance.py``.
+#
+# Every write goes through ``state.mutate``. It used to be load-then-save, which
+# on a shared list is a lost update: two people adding a brand at the same time
+# both read the same list, both append their own, and the second save overwrites
+# the first — one brand gone, nothing anywhere saying so. Harmless while a
+# Creator added a brand every few months; not harmless now that any GEO editor
+# can add one and twelve go in during a single sitting.
+
+#: The registry document id. Written down once so a reader and a writer cannot
+#: drift onto two different documents.
+BRANDS_DOC = "brands"
+
+
+def _brands_of(doc: dict | None) -> list[dict]:
+    """The brand list a registry document holds, defaulting the empty case.
+
+    An absent or empty document reads as :data:`DEFAULT_BRANDS` — the behaviour
+    ``list_brands`` has always had, kept in one place because it now has to hold
+    identically INSIDE a transaction: a first-ever write must build on the same
+    list every reader has been seeing, not on an empty one.
+    """
+    return doc["brands"] if doc and doc.get("brands") else [dict(b) for b in DEFAULT_BRANDS]
+
+
+def _sorted(brands: list[dict]) -> list[dict]:
+    return sorted(brands, key=lambda b: str(b.get("name") or b.get("id") or "").lower())
+
+
+def list_brands() -> list[dict]:
+    return _brands_of(state.load(BRANDS_DOC))
+
+
+def upsert_brand(brand: dict) -> list[dict]:
+    """Create or replace one brand record. Last writer wins on THIS brand only —
+    concurrent edits to other brands in the list are no longer lost."""
+
+    def change(doc: dict) -> tuple[dict, list[dict]]:
+        brands = _sorted([b for b in _brands_of(doc) if b["id"] != brand["id"]] + [brand])
+        return {"brands": brands}, brands
+
+    return state.mutate(BRANDS_DOC, change)
+
+
+def create_brand(brand: dict) -> dict:
+    """Add a brand that does not exist yet; raise ``ValueError`` if it does.
+
+    Separate from :func:`upsert_brand` because self-serve creation must never
+    silently overwrite a brand somebody else already set up — same slug, same
+    ``geo-config-*`` and ``gsc-auth-*`` documents underneath it, a year of
+    measurement now attached to a different name. The existence check runs
+    INSIDE the transaction, so two people typing the same brand name at once end
+    with one brand and one honest 409, not with a coin toss.
+    """
+
+    def change(doc: dict) -> tuple[dict, dict]:
+        brands = _brands_of(doc)
+        if any(b["id"] == brand["id"] for b in brands):
+            raise ValueError(f"A brand with the id '{brand['id']}' already exists")
+        return {"brands": _sorted(brands + [brand])}, dict(brand)
+
+    return state.mutate(BRANDS_DOC, change)
+
+
+def set_brand_enabled(brand_id: str, enabled: bool) -> dict:
+    """Flip one brand's ``enabled`` flag; raise ``KeyError`` if it is not there.
+
+    This is what a self-serve "remove" does. ``enabled`` is already the filter
+    every consumer applies (``geo._enabled_brands``, ``blog_writer._brand``,
+    ``issues``), so switching it off takes the brand out of GEO, SEO, Blog Writer
+    and Issues in one write — and switching it back on restores it, with every
+    stored measurement, prompt universe and Search Console grant untouched.
+    """
+
+    def change(doc: dict) -> tuple[dict, dict]:
+        brands = _brands_of(doc)
+        if not any(b["id"] == brand_id for b in brands):
+            raise KeyError(brand_id)
+        out = [dict(b, enabled=enabled) if b["id"] == brand_id else b for b in brands]
+        return {"brands": out}, next(b for b in out if b["id"] == brand_id)
+
+    return state.mutate(BRANDS_DOC, change)
+
+
+def delete_brand(brand_id: str) -> list[dict]:
+    """HARD delete: drop the registry entry and this brand's SEO run + to-dos.
+
+    It leaves every other ``…-{brand_id}`` document behind — including
+    ``gsc-auth-{brand_id}``, which holds a live Google Search Console refresh
+    token. That is why it stays Creator-only and why the self-serve path is
+    :func:`set_brand_enabled` instead.
+    """
+
+    def change(doc: dict) -> tuple[dict, list[dict]]:
+        brands = [b for b in _brands_of(doc) if b["id"] != brand_id]
+        return {"brands": brands}, brands
+
+    brands = state.mutate(BRANDS_DOC, change)
+    state.delete(f"run-{brand_id}")
+    state.delete(f"todos-{brand_id}")
+    return brands
+
+
+# ---------------------------- brand record shaping ----------------------------
+#
+# Both the Creator upsert (``POST /api/seo-geo/brands``) and the GEO editor's
+# self-serve create (``POST /api/geo/brands``) turn typed text into the same
+# record, so the rules live here rather than in whichever router was written
+# first. Two copies of "what is a valid brand id" is two answers to it.
+
+def slugify_brand_id(value: str) -> str:
+    """The brand id derived from a name. Raises ``ValueError`` when nothing is
+    left — a brand of punctuation has no id and must not get an empty one, which
+    would collide with every other brand of punctuation."""
+    slug = re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+    if not slug:
+        raise ValueError("Brand needs a name")
+    return slug
+
+
+def normalize_domain(value: str) -> str:
+    """The bare host from anything a human types: a domain, or a full URL.
+
+    ``https://www.Acme.com/pricing?x=1`` and ``acme.com`` must land on the same
+    string, because that string is the brand's identity in Search Console
+    (``sc-domain:{domain}``), in citation matching and in the GEO alias set. The
+    path is dropped rather than kept: a domain with a ``/`` in it silently broke
+    every one of those.
+    """
+    raw = (value or "").strip()
+    host = re.sub(r"^[a-z][a-z0-9+.-]*://", "", raw, flags=re.I)  # scheme
+    host = host.split("/")[0].split("?")[0].split("#")[0]          # path/query
+    host = host.rsplit("@", 1)[-1].split(":")[0]                   # userinfo, port
+    host = host.strip().lower().removeprefix("www.").rstrip(".")
+    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
+        raise ValueError("Enter the site domain, e.g. brand.com")
+    return host
+
+
+# ------------------------------- to-do building -------------------------------
+
+def todo_id(brand_id: str, kind: str, page: str, query: str) -> str:
+    """Stable across runs so a to-do keeps its assigned/done status after a refresh."""
+    return hashlib.sha1(f"{brand_id}|{kind}|{page}|{query}".encode()).hexdigest()[:12]
+
+
+def _todo(brand_id: str, kind: str, row: QueryStat, action: str, why: str, gain: float) -> dict:
+    return {
+        "id": todo_id(brand_id, kind, row.page, row.query),
+        "kind": kind,
+        "page": row.page,
+        "query": row.query,
+        "action": action,
+        "why": why,
+        "est_monthly_clicks": max(1, round(gain)),
+        "position": round(row.position, 1),
+        "impressions": row.impressions,
+        "status": "todo",
+    }
+
+
+def build_todos(brand_id: str, rows: list[QueryStat], prev_rows: list[QueryStat]) -> list[dict]:
+    todos: list[dict] = []
+    for r in rows:
+        if r.impressions < MIN_IMPRESSIONS:
+            continue
+        # Striking distance: page 1-2 but below the fold — content refresh moves it.
+        if 4 <= r.position <= 15:
+            target = max(3, round(r.position) - 3)
+            gain = r.impressions * (ctr_at(target) - ctr_at(r.position))
+            if gain >= 5:
+                todos.append(_todo(
+                    brand_id, "striking", r,
+                    f"Refresh the content and add internal links for '{r.query}'",
+                    f"Ranks #{round(r.position)} with {r.impressions:,} monthly impressions — "
+                    f"moving to #{target} is a realistic content fix",
+                    gain,
+                ))
+        # CTR gap: ranks well but the title/meta isn't earning the clicks it should.
+        elif r.position <= 6 and r.ctr < 0.5 * ctr_at(r.position):
+            gain = r.impressions * (0.8 * ctr_at(r.position) - r.ctr)
+            if gain >= 5:
+                todos.append(_todo(
+                    brand_id, "ctr_gap", r,
+                    f"Rewrite the title and meta description targeting '{r.query}'",
+                    f"Ranks #{round(r.position)} but gets {r.ctr:.1%} CTR vs ~{ctr_at(r.position):.0%} "
+                    "expected at that spot — the snippet isn't selling the click",
+                    gain,
+                ))
+
+    # Decaying pages: clicks dropped vs the prior period — refresh recovers most of it.
+    prev_by_page: dict[str, int] = {}
+    for r in prev_rows:
+        prev_by_page[r.page] = prev_by_page.get(r.page, 0) + r.clicks
+    now_by_page: dict[str, int] = {}
+    for r in rows:
+        now_by_page[r.page] = now_by_page.get(r.page, 0) + r.clicks
+    for page, prev_clicks in prev_by_page.items():
+        now_clicks = now_by_page.get(page, 0)
+        if prev_clicks >= 30 and now_clicks < prev_clicks * (1 - DECAY_DROP):
+            top = max((r for r in rows if r.page == page), key=lambda r: r.impressions, default=None)
+            row = top or QueryStat(query="(overall)", page=page, clicks=now_clicks,
+                                   impressions=prev_clicks, ctr=0.0, position=0.0)
+            todos.append(_todo(
+                brand_id, "decay", row,
+                "Update this page — refresh facts, date, and re-promote internally",
+                f"Clicks fell from {prev_clicks} to {now_clicks} in 28 days; "
+                "refreshed pages typically recover most of the loss",
+                0.7 * (prev_clicks - now_clicks),
+            ))
+
+    todos.sort(key=lambda t: t["est_monthly_clicks"], reverse=True)
+    return todos[:MAX_TODOS]
+
+
+def _summary(rows: list[QueryStat], prev_rows: list[QueryStat], todos: list[dict]) -> dict:
+    clicks = sum(r.clicks for r in rows)
+    impressions = sum(r.impressions for r in rows)
+    prev_clicks = sum(r.clicks for r in prev_rows)
+    weighted_pos = (
+        sum(r.position * r.impressions for r in rows) / impressions if impressions else 0.0
+    )
+    return {
+        "mode": "search-console",
+        "clicks_28d": clicks,
+        "clicks_prev_28d": prev_clicks,
+        "impressions_28d": impressions,
+        "avg_position": round(weighted_pos, 1),
+        "est_potential_clicks": sum(t["est_monthly_clicks"] or 0 for t in todos),
+    }
+
+
+# ---------------- rank-tracking mode (no Search Console access) ----------------
+
+def _rank_todo(brand_id: str, kind: str, kw: str, position, action: str, why: str, priority: int) -> dict:
+    return {
+        "id": todo_id(brand_id, kind, "", kw),
+        "kind": kind,
+        "page": "",
+        "query": kw,
+        "action": action,
+        "why": why,
+        "est_monthly_clicks": None,  # honest: no impression data without Search Console
+        "position": position or 0,
+        "impressions": None,
+        "status": "todo",
+        "_priority": priority,
+    }
+
+
+def build_rank_todos(brand_id: str, ranks_doc: dict) -> list[dict]:
+    """Fix list from live rank snapshots: drops first, then near-page-1, then gaps."""
+    snaps = ranks_doc.get("snapshots", [])
+    if not snaps:
+        return []
+    latest = snaps[-1]["ranks"]
+    prev = snaps[-2]["ranks"] if len(snaps) > 1 else {}
+    todos: list[dict] = []
+    for kw, entry in latest.items():
+        pos = entry.get("position")
+        before = (prev.get(kw) or {}).get("position")
+        owners = ", ".join(entry.get("top", [])[:3])
+        if before and pos and pos - before >= 2:
+            todos.append(_rank_todo(
+                brand_id, "rank_drop", kw, pos,
+                f"Investigate the ranking drop for '{kw}'",
+                f"Fell #{before} → #{pos} since the last check — likely a competitor update or stale content",
+                priority=0,
+            ))
+        if pos is None:
+            todos.append(_rank_todo(
+                brand_id, "unranked", kw, None,
+                f"Create or strengthen a page targeting '{kw}'",
+                f"Not in the top 10 — currently owned by {owners}",
+                priority=2,
+            ))
+        elif 4 <= pos <= 15:
+            todos.append(_rank_todo(
+                brand_id, "striking", kw, pos,
+                f"Refresh the page targeting '{kw}'",
+                f"Ranks #{pos} — a content refresh can realistically reach #{max(3, pos - 3)}",
+                priority=1,
+            ))
+    todos.sort(key=lambda t: (t["_priority"], t["position"] or 99))
+    for t in todos:
+        del t["_priority"]
+    return todos[:MAX_TODOS]
+
+
+def _rank_summary(ranks_doc: dict) -> dict:
+    snaps = ranks_doc.get("snapshots", [])
+    latest = snaps[-1]["ranks"] if snaps else {}
+    prev = snaps[-2]["ranks"] if len(snaps) > 1 else {}
+    positions = [e.get("position") for e in latest.values()]
+    ranked = [p for p in positions if p]
+    moved_up = moved_down = 0
+    for kw, entry in latest.items():
+        before = (prev.get(kw) or {}).get("position")
+        now = entry.get("position")
+        if before and now:
+            moved_up += now < before
+            moved_down += now > before
+    return {
+        "mode": "rank-tracking",
+        "tracked": len(positions),
+        "top3": sum(1 for p in ranked if p <= 3),
+        "top10": len(ranked),
+        "unranked": sum(1 for p in positions if p is None),
+        "moved_up": moved_up,
+        "moved_down": moved_down,
+        "clicks_28d": 0, "clicks_prev_28d": 0, "impressions_28d": 0,
+        "avg_position": round(sum(ranked) / len(ranked), 1) if ranked else 0,
+        "est_potential_clicks": 0,
+    }
+
+
+def _rank_bullets(summary: dict, todos: list[dict]) -> list[str]:
+    bullets = [
+        f"{summary['top10']} of {summary['tracked']} tracked keywords are on page 1 "
+        f"({summary['top3']} in the top 3)."
+    ]
+    if summary["moved_down"]:
+        bullets.append(f"{summary['moved_down']} keyword(s) dropped since the last check — drops lead the fix list.")
+    if summary["moved_up"]:
+        bullets.append(f"{summary['moved_up']} keyword(s) moved up — whatever changed there is working.")
+    if summary["unranked"]:
+        bullets.append(f"{summary['unranked']} keyword(s) have no page in the top 10 — those are content gaps.")
+    return bullets
+
+
+def _insight_bullets(summary: dict, todos: list[dict]) -> list[str]:
+    bullets = []
+    delta = summary["clicks_28d"] - summary["clicks_prev_28d"]
+    trend = "up" if delta >= 0 else "down"
+    bullets.append(
+        f"Organic clicks are {trend} {abs(delta):,} vs the prior 28 days "
+        f"({summary['clicks_prev_28d']:,} → {summary['clicks_28d']:,})."
+    )
+    striking = [t for t in todos if t["kind"] == "striking"]
+    if striking:
+        bullets.append(
+            f"{len(striking)} page(s) sit just below the top results — the to-do list "
+            f"estimates +{sum(t['est_monthly_clicks'] for t in striking):,} clicks/month if fixed."
+        )
+    decays = [t for t in todos if t["kind"] == "decay"]
+    if decays:
+        bullets.append(f"{len(decays)} page(s) are losing traffic and need a refresh.")
+    if summary["est_potential_clicks"]:
+        bullets.append(
+            f"Full to-do list is worth an estimated +{summary['est_potential_clicks']:,} clicks/month."
+        )
+    return bullets
+
+
+# ---------------------------------- runs ----------------------------------
+
+def _ga_section(brand: dict, end: date) -> dict:
+    """Live GA4 overview for one brand; discovers + pins the property on first use.
+
+    ``ga_discover_property`` falls back to "the only property the service account
+    can see" when nothing matches the domain. That is a good convenience for the
+    first brand in a workspace and a silent misattribution for the second: with
+    one GA property shared and two brands, brand B inherits brand A's traffic and
+    ``upsert_brand`` then *pins* it, so the numbers never self-correct.
+
+    That is exactly what happened to ``berry-virtual``, whose panel reported
+    ``legal-soft``'s 25,595 sessions under the name "Legal Soft". So a discovered
+    property that another brand has already pinned is refused here rather than
+    claimed. Degrading is honest and recoverable — the run continues, the note
+    lands in ``degraded``, and whoever owns the brand pins the right
+    ``ga4_property``. Reporting another brand's traffic as yours is neither.
+
+    The check lives at the caller, not in ``ga_discover_property``, because only
+    this layer knows the brand registry — the adapter stays a pure Google API
+    wrapper, and its single-property fallback keeps working for the first brand.
+    """
+    prop = brand.get("ga4_property")
+    name = brand.get("ga4_property_name", "")
+    if not prop:
+        found = ga_discover_property(brand["domain"])
+        prop, name = found["property"], found["name"]
+        taken_by = next(
+            (
+                other
+                for other in list_brands()
+                if other.get("id") != brand.get("id")
+                and other.get("ga4_property") == prop
+            ),
+            None,
+        )
+        if taken_by:
+            raise CredentialMissing(
+                f"GA property {name or prop!r} is already pinned to "
+                f"{taken_by.get('name') or taken_by.get('id')} — refusing to report "
+                f"its traffic as {brand.get('name') or brand.get('id')}. Set this "
+                f"brand's ga4_property explicitly if it really shares that property."
+            )
+        upsert_brand({**brand, "ga4_property": prop, "ga4_property_name": name})
+    data = ga_fetch_overview(
+        prop,
+        end - timedelta(days=28), end,
+        end - timedelta(days=56), end - timedelta(days=29),
+    )
+    return {"property": prop, "property_name": name, **data}
+
+
+def _ga_bullet(ga: dict) -> str | None:
+    now_s = ga["totals"]["sessions"]
+    prev_s = ga["prev_totals"]["sessions"]
+    if not prev_s:
+        return None
+    trend = "up" if now_s >= prev_s else "down"
+    return (
+        f"Website sessions are {trend} {abs(now_s - prev_s):,} vs the prior 28 days "
+        f"({prev_s:,} → {now_s:,}) — Google Analytics."
+    )
+
+
+def _competitor_topic_pool(brand_id: str) -> list[str]:
+    """Flatten hot_topics + recent-post topics across a brand's competitor profiles
+    (Task 5's `competitor-profiles-{id}` doc) into blog-topic-lab candidates.
+    None-safe: no profiles yet is a normal, non-fatal state, not a degraded run."""
+    doc = competitors.latest_profiles(brand_id) or {}
+    pool: list[str] = []
+    for profile in doc.get("profiles") or []:
+        pool.extend(t for t in (profile.get("hot_topics") or []) if t)
+        pool.extend(
+            post.get("topic") for post in (profile.get("recent_posts") or []) if post.get("topic")
+        )
+    return pool
+
+
+def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
+    """Pull data, build insights + to-dos + blog topics for one brand, persist."""
+    end = today or date.today()
+    degraded: list[str] = []
+    rows: list[QueryStat] = []
+    prev_rows: list[QueryStat] = []
+    try:
+        # A customer's own OAuth grant wins; the shared service account is the fallback.
+        svc = gsc_oauth.service(brand["id"])
+        conn = gsc_oauth.connection(brand["id"]) if svc else None
+        prop = conn["property"] if conn else (brand.get("gsc_property") or f"sc-domain:{brand['domain']}")
+        rows = gsc_fetch(prop, end - timedelta(days=28), end, service=svc)
+        prev_rows = gsc_fetch(prop, end - timedelta(days=56), end - timedelta(days=29), service=svc)
+    except CredentialMissing as exc:
+        degraded.append(f"Search Console: {exc}")
+
+    if rows:
+        todos = build_todos(brand["id"], rows, prev_rows)
+        summary = _summary(rows, prev_rows, todos)
+        bullets = _insight_bullets(summary, todos)
+    else:
+        # No Search Console access: run on live rank snapshots instead (Serper).
+        try:
+            ranks_doc = competitors.rank_snapshot(brand)
+            todos = build_rank_todos(brand["id"], ranks_doc)
+            summary = _rank_summary(ranks_doc)
+            bullets = _rank_bullets(summary, todos)
+        except CredentialMissing as exc:
+            degraded.append(f"Rank tracking: {exc}")
+            todos, bullets = [], []
+            summary = _summary([], [], [])
+
+    # Live website analytics (GA4) ride along; the run never fails on them.
+    ga = None
+    try:
+        ga = _ga_section(brand, end)
+    except CredentialMissing as exc:
+        degraded.append(f"Google Analytics: {exc}")
+    if ga:
+        bullet = _ga_bullet(ga)
+        if bullet:
+            bullets.append(bullet)
+
+    # Page-level intelligence rides along too — never fatal to the run.
+    corpus = {}
+    try:
+        corpus = state.load(f"corpus-{brand['id']}") or {}
+        if corpus.get("pages"):
+            ga_pages = []
+            if ga:
+                ga_pages = ga_fetch_pages(
+                    ga["property"], end - timedelta(days=28), end)
+            # Forward whatever GA/GSC degradation this run already hit — a zeroed
+            # metric in the pages doc must carry the reason, not read as real data.
+            page_notes = [n for n in degraded if n.startswith(("Search Console:", "Google Analytics:"))]
+            pages_mod.build_page_intel(brand, corpus["pages"], ga_pages, rows, data_notes=page_notes)
+    except CredentialMissing as exc:
+        degraded.append(f"Page analytics: {exc}")
+
+    # Site-review findings ride along in the fix list (stable ids keep status).
+    todos = (todos + site_brain.site_todos(brand["id"]))[:MAX_TODOS]
+
+    topic_list, topic_notes = topics.build_topics(
+        site_brain.effective_seeds(brand), rows, prev_rows,
+        corpus_pages=corpus.get("pages"),
+        competitor_topics=_competitor_topic_pool(brand["id"]),
+    )
+    degraded.extend(topic_notes)
+
+    run = {
+        "brand_id": brand["id"],
+        "at": end.isoformat(),
+        "trigger": trigger,
+        "degraded": degraded,
+        "summary": summary,
+        "insights": bullets,
+        "todos": todos,
+        "topics": topic_list,
+        "ga": ga,
+    }
+    state.save(f"run-{brand['id']}", run)
+    return run
+
+
+def latest_run(brand_id: str) -> dict | None:
+    run = state.load(f"run-{brand_id}")
+    if not run:
+        return None
+    # Overlay saved statuses so a data refresh never wipes assigned/done marks.
+    overlay = (state.load(f"todos-{brand_id}") or {}).get("status", {})
+    for todo in run.get("todos", []):
+        if todo["id"] in overlay:
+            todo["status"] = overlay[todo["id"]]
+    return run
+
+
+def set_todo_status(brand_id: str, item_id: str, status: str) -> None:
+    doc = state.load(f"todos-{brand_id}") or {"status": {}}
+    doc.setdefault("status", {})[item_id] = status
+    state.save(f"todos-{brand_id}", doc)

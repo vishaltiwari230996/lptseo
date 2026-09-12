@@ -1,0 +1,29 @@
+/* Ensemble — Spacing & layout tokens (4px base, airy by default) */
+:root {
+  --space-0:   0;
+  --space-1:   4px;
+  --space-2:   8px;
+  --space-3:   12px;
+  --space-4:   16px;
+  --space-5:   20px;
+  --space-6:   24px;
+  --space-7:   32px;
+  --space-8:   40px;
+  --space-9:   48px;
+  --space-10:  64px;
+  --space-11:  80px;
+  --space-12:  96px;
+  --space-13:  128px;
+
+  /* Component-level rhythm */
+  --gap-inline:    var(--space-2);
+  --pad-control:   var(--space-3);
+  --pad-card:      var(--space-6);
+  --pad-section:   var(--space-10);
+
+  /* Layout */
+  --container-max: 1200px;
+  --content-max:   720px;
+  --sidebar-w:     264px;
+  --topbar-h:      60px;
+}

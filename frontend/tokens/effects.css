@@ -1,0 +1,97 @@
+/* Ensemble — Effects: radii, borders, shadows, motion (OpenRouter Bauhaus)
+   Flat elevation: 1px alpha borders carry depth; shadows near-zero. 150ms color motion. */
+:root {
+  /* ---- Radii (OpenRouter: 4/6/8/12) ---- */
+  --radius-xs:   2px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   8px;
+  --radius-xl:   12px;
+  --radius-2xl:  16px;
+  --radius-pill: 999px;
+
+  /* ---- Border widths ---- */
+  --border-w:        1px;
+  --border-w-strong: 1px;
+
+  /* ---- Shadows (near-flat; 1px borders carry elevation) ---- */
+  --shadow-xs:  0 1px 2px rgba(3,8,10,0.04);
+  --shadow-sm:  0 1px 3px rgba(3,8,10,0.06);
+  --shadow-md:  0 2px 8px -2px rgba(3,8,10,0.08);
+  --shadow-lg:  0 8px 24px -8px rgba(3,8,10,0.10);
+  --shadow-xl:  0 25px 50px -12px rgba(3,8,10,0.25);
+
+  /* Focus halo (paired with --focus-ring color) */
+  --ring:       0 0 0 3px var(--focus-ring);
+
+  /* ---- Motion (150ms color transitions, calm curves) ---- */
+  --ease-out:    cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast:    150ms;
+  --dur-base:    200ms;
+  --dur-slow:    300ms;
+  --dur-slower:  400ms;
+}
+
+/* ---- Animation Keyframes ---- */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeInScale {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--brand) 40%, transparent); }
+  50% { box-shadow: 0 0 20px 4px color-mix(in srgb, var(--brand) 20%, transparent); }
+}
+
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}

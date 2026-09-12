@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40" width="40" height="40">
+  <!-- Favicon variant of the Law Prep Tutorial mark. Browser chrome sits on either
+       a light or a dark toolbar and gives us no theme signal — but this mark needs
+       no signal, because it carries its own ground: red scales on the brand yellow,
+       the same figure/ground as the site's own favicon. So unlike the mark this
+       replaced, the only difference here is that the two brand colours are written
+       out literally instead of read from CSS variables, which a favicon has no
+       access to. Keep the geometry in step with BrandMark in lib/kit-ui.tsx. -->
+  <rect width="40" height="40" rx="9" fill="#ffff00"/>
+  <g fill="#ff0000">
+    <circle cx="20" cy="10.2" r="2.5"/>
+    <rect x="6" y="13" width="28" height="2.4" rx="1.2"/>
+    <rect x="18.8" y="12" width="2.4" height="18.5"/>
+    <rect x="12.5" y="29.6" width="15" height="2.6" rx="1.3"/>
+    <path d="M5 15.4 H15 L10 22.6 Z"/>
+    <path d="M25 15.4 H35 L30 22.6 Z"/>
+  </g>
+</svg>

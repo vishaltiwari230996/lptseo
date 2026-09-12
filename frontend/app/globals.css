@@ -1,0 +1,49 @@
+/* The SEO agent's stylesheet, extracted from the console's `app/globals.css`.
+ *
+ * Two design systems are loaded at once, exactly as in the console. The old one
+ * (`styles.css`, `kit-ui.css`, `console.css`, `seo.css`) dresses the SEO panel,
+ * which has not been rebuilt yet; `agenthub.css` is the new system and carries
+ * the shell chrome and the palette.
+ *
+ * They share exactly one custom property name, `--surface`, and no class names
+ * at all. `agenthub.css` is imported last so the new system wins globally, and
+ * `hub-live.css` pins the old value of `--surface` back inside `.legacy` —
+ * which is the wrapper the SEO panel renders in, here as in the console.
+ *
+ * Removed from the console's copy: the other agents' panel sheets
+ * (creative.css, gd2.css, mr.css, blogwriter.css, geo.css). Nothing in this
+ * extract renders them.
+ */
+
+/* Archivo, worked across its width axis — the new system's only typeface. */
+@import url("https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,400..800;1,62..125,400..800&display=swap");
+
+/* --- the old system, which the SEO panel is still on --------------------- */
+@import url("../styles.css");
+@import url("./kit-ui.css");
+@import url("./console.css");
+/* The .mr-* console chrome. MUST precede seo.css, which overrides parts of
+   it. See the file header for why it had to be written at all. */
+@import url("./console-shell.css");
+@import url("./seo.css");
+/* Signed-out marketing surface. Loaded after seo.css so its own scoped
+   `.lp-*` rules never collide with the console's. */
+@import url("./landing.css");
+/* Dashboard surfaces (tiles, sitemap, vitals, keyword pool). After seo.css so
+   its `.seo-app`-scoped rules layer on the panel vocabulary. */
+@import url("./dashboard.css");
+/* Deep audit (landing, sitemap, cannibalization, density, page speed). */
+@import url("./deep.css");
+
+/* --- the new one -------------------------------------------------------- */
+@import url("./agenthub.css");
+/* After agenthub.css on purpose: it carries the dark palette that replaces the
+   prototype's, and fills three tokens agenthub.css uses but never defines. */
+@import url("./hub-theme.css");
+@import url("./hub-live.css");
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

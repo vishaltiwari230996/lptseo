@@ -1,0 +1,40 @@
+# Local-dev dependency set for the standalone SEO agent extract.
+#
+# `requirements.txt` is the parent monorepo's, copied byte-identical, and most
+# of it belongs to agents that are NOT in this extract (Graphics Designer,
+# GEO optimizer, Marketing Research): reportlab, python-pptx, PyMuPDF, svglib,
+# pillow, openpyxl, PyYAML, trafilatura, numpy, pypdf, python-docx,
+# google-cloud-storage. `cairosvg` additionally needs native Cairo DLLs that
+# Windows does not ship — requirements.txt already flags it "Linux/Cloud Run;
+# optional locally".
+#
+# What is below is exactly what this extract imports (verified by walking every
+# import in `app/` and `agents/SEO GEO agent/`). Use requirements.txt for the
+# container build; use this to run the extract on a laptop.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+
+# auth: app JWTs + Google ID-token verification
+PyJWT>=2.8
+google-auth>=2.30
+
+# seo_geo_agent.state cloud mode + firestore_repo (unused when SEO_OFFLINE=1,
+# but imported at module load)
+google-cloud-firestore>=2.16
+
+# outbound HTTP: sources.py, competitors.py, audit.py
+httpx>=0.27
+requests>=2.31
+
+# app.services.openrouter -> ChatOpenAI (imported at startup via sources.py)
+langchain-openai>=0.2
+
+# seo_geo_agent.gsc_oauth -> Search Console / GA4 Data API clients
+google-api-python-client>=2.130
+google-auth-httplib2>=0.2
+
+# the verification bar
+pytest>=8.0
