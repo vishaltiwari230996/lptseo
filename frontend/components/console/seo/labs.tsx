@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isAbortError, RequestSequence,
-  seoAsk, seoAuditReport, seoBriefs, seoBuildBrief, seoCompetitorProfiles, seoCompetitorProfilesRefresh,
-  seoCompetitors, seoDraftScore, seoKeywordLab, seoRunAudit, seoRunKeywordLab, seoSetCompetitors,
+  seoAddCustomQuery, seoAsk, seoAuditReport, seoBriefs, seoBuildBrief, seoCompetitorProfiles, seoCompetitorProfilesRefresh,
+  seoCompetitors, seoDraftScore, seoKeywordLab, seoRemoveCustomQuery, seoRunAudit, seoRunKeywordLab, seoSetCompetitors,
   seoTrackCompetitors, seoUpdatePlan,
   type SeoAuditReport, type SeoBrief, type SeoCompetitorProfilesDoc, type SeoCompetitors,
   type SeoDraftScore, type SeoKeywordLab, type SeoUpdatePlan,
@@ -246,6 +246,8 @@ export function CompetitorsView({ brandId, isCreator, onToast }: {
   const [profilesBusy, setProfilesBusy] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [retry, setRetry] = useState(0);
+  const [newQuery, setNewQuery] = useState("");
+  const [queryBusy, setQueryBusy] = useState(false);
 
   // Both loads are keyed on the brand and both clear first, so a slower
   // response for the previous brand can neither land nor linger under the new
@@ -311,6 +313,30 @@ export function CompetitorsView({ brandId, isCreator, onToast }: {
       onToast(errMsg(e, "Tracking failed"), "error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function addQuery() {
+    const query = newQuery.trim();
+    if (!query) return;
+    setQueryBusy(true);
+    try {
+      const res = await seoAddCustomQuery(brandId, query);
+      setData((d) => d && { ...d, custom_queries: res.custom_queries, pool_size: res.pool_size });
+      setNewQuery("");
+    } catch (e) {
+      onToast(errMsg(e, "Could not add query"), "error");
+    } finally {
+      setQueryBusy(false);
+    }
+  }
+
+  async function removeQuery(query: string) {
+    try {
+      const res = await seoRemoveCustomQuery(brandId, query);
+      setData((d) => d && { ...d, custom_queries: res.custom_queries, pool_size: res.pool_size });
+    } catch (e) {
+      onToast(errMsg(e, "Could not remove query"), "error");
     }
   }
 
@@ -430,6 +456,39 @@ export function CompetitorsView({ brandId, isCreator, onToast }: {
           <button className="seo-btn seo-btn--primary" disabled={busy} onClick={() => void track()}>
             <Icon name="refresh-cw" size={13} /> Check now
           </button>
+        </div>
+        <div className="seo-comp__queries">
+          <div className="seo-lab__meta">
+            Tracking {data?.pool_size ?? 0} of {data?.pool_cap ?? 50} possible queries
+          </div>
+          {isCreator && (
+            <div className="seo-comp__query-add">
+              <input
+                className="seo-input"
+                placeholder="Add a query to track…"
+                value={newQuery}
+                onChange={(e) => setNewQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void addQuery()}
+              />
+              <button className="seo-btn" disabled={queryBusy || !newQuery.trim()} onClick={() => void addQuery()}>
+                Add
+              </button>
+            </div>
+          )}
+          {!!data?.custom_queries.length && (
+            <div className="seo-comp__query-list">
+              {data.custom_queries.map((q) => (
+                <span key={q} className="seo-chip">
+                  {q}
+                  {isCreator && (
+                    <button className="seo-chip__x" aria-label={`Remove ${q}`} onClick={() => void removeQuery(q)}>
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         {dataError && (
           <LoadError what="the ranking snapshots" error={dataError}

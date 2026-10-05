@@ -1,59 +1,65 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  seoAnalyzeSite, seoBrandDetail, seoDeleteBrand, seoOauthDisconnect, seoOauthStart, seoOverview,
-  seoKeywordPool, seoPages, seoPagesRefresh, seoRunBrand, seoSaveBrand, seoSetTodoStatus,
+  seoAnalyzeSite, seoBrandDetail, seoDeleteBrand, seoKeywordLab, seoOauthDisconnect, seoOauthStart,
+  seoOverview, seoKeywordPool, seoPages, seoPagesRefresh, seoRunBrand, seoSaveBrand,
   seoSitemap, seoVitals,
-  type SeoBrand, type SeoGa, type SeoGscStatus, type SeoKeywordPoolDoc, type SeoOverview,
-  type SeoPagesDoc, type SeoPlanItem, type SeoRun, type SeoSiteReview, type SeoSitemapDoc,
-  type SeoTodoStatus, type SeoTopic, type SeoVitalsDoc,
+  type SeoBrand, type SeoGa, type SeoGscStatus, type SeoKeywordLab, type SeoKeywordPoolDoc,
+  type SeoOverview, type SeoPagesDoc, type SeoRun, type SeoSiteReview, type SeoSitemapDoc,
+  type SeoTopic, type SeoVitalsDoc,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { useAuth } from "@/lib/auth";
 import { BrandMark, Icon } from "@/lib/kit-ui";
 import { describeFailure, useLoadSession } from "@/lib/load";
-import { AskView, AuditView, BriefsView, CompetitorsView, KeywordsView, UpdatePlanButton } from "./labs";
+import { AskView, AuditView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
 import { DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
 import { DeepAuditPanel } from "./deep";
+import { InsightsView } from "./insights";
+import { Shell, type SidebarSection } from "./shell";
 
-type SeoTool = "ask" | "keywords" | "briefs" | "audit";
+/* "Keyword lab" used to live here too; it now sits in the Keywords section,
+   next to the pool it feeds, rather than behind a second switcher. */
+type SeoTool = "ask" | "briefs" | "audit";
 
 const TOOL_LABELS: Record<SeoTool, string> = {
   ask: "Ask the analyst",
-  keywords: "Keyword lab",
   briefs: "Content briefs",
   audit: "Site audit",
 };
 
+/** The console's left rail. Ids are a contract: the backend's priority items
+ *  link to `#vitals`, `#keywords`, `#deep-audit` and `#traffic`, so those four
+ *  ids must keep spelling exactly as they do here. */
+const SECTIONS: SidebarSection[] = [
+  { id: "insights", label: "Insights" },
+  { id: "traffic", label: "Traffic & rankings" },
+  { id: "health", label: "Website health" },
+  { id: "keywords", label: "Keywords" },
+  { id: "competitors", label: "Competitors" },
+  { id: "vitals", label: "Core Web Vitals" },
+  { id: "deep-audit", label: "Deep audit" },
+  { id: "pages", label: "Pages" },
+  { id: "tools", label: "Tools" },
+];
+
+/** The nine ids above, as a union — kept separate from `SidebarSection`'s
+ *  plain `string` id so `Shell` (a generic reusable container that knows
+ *  nothing about this app's sections) doesn't have to. Any id that isn't one
+ *  of these — e.g. a stale persisted `priorities` doc's `action_link` after a
+ *  future id rename — is treated as unrecognized and falls back to Insights,
+ *  both at the type level (`activeSection`'s state) and at runtime (see
+ *  `navigateToSection` below). */
+type SectionId = "insights" | "traffic" | "health" | "keywords" | "competitors" | "vitals" | "deep-audit" | "pages" | "tools";
+
+function isSectionId(id: string): id is SectionId {
+  return SECTIONS.some((s) => s.id === id);
+}
+
 /** SEO agent (a2) — per-brand insights, traffic-estimated to-dos, blog topic lab. */
 
 const fmt = (n: number) => n.toLocaleString("en-US");
-
-/** The path part of a page URL, for the meta line under a fix.
- *
- *  `new URL()` percent-encodes whatever it is handed, so a `page` value that
- *  was really a sentence came back as `/a%20(3991w),%20/b%20%E2%80%94%20three
- *  %20pages...` — unreadable, and with no spaces in it, unwrappable, which is
- *  what pushed the whole console into a horizontal scroll. The source of those
- *  values is fixed (`site_brain._evidence_page`), but this decodes and caps
- *  regardless: a display helper should not be the thing that breaks the page
- *  layout when it is handed something unexpected. */
-function shortPage(url: string): string {
-  const cap = (s: string) => (s.length > 80 ? `${s.slice(0, 79)}…` : s);
-  try {
-    const u = new URL(url);
-    let path = u.pathname;
-    try {
-      path = decodeURIComponent(path);
-    } catch {
-      /* malformed escapes — keep the raw path */
-    }
-    return cap(path === "/" ? u.hostname : path);
-  } catch {
-    return cap(url);
-  }
-}
 
 function Delta({ now, prev }: { now: number; prev: number }) {
   const diff = now - prev;
@@ -216,7 +222,7 @@ function Story({ run }: { run: SeoRun | null }) {
       <div className="seo-story">
         <p>
           <strong>{run.summary.top10 ?? 0} of {run.summary.tracked ?? 0}</strong> keywords we track are on
-          page 1 of Google. The plan below is the fastest way to add more.
+          page 1 of Google. Insights is the fastest way to add more.
         </p>
       </div>
     );
@@ -228,24 +234,6 @@ function Story({ run }: { run: SeoRun | null }) {
         <strong>{fmt(run.summary.clicks_28d)} visits came from Google</strong> in the last 28 days
         {trend ? ` — ${trend}` : ""}.
       </p>
-    </div>
-  );
-}
-
-/** A quiet, collapsed section: the headline carries the takeaway, the body carries the detail. */
-function Fold({ title, hint, count, defaultOpen = false, children }: {
-  title: string; hint?: string; count?: number; defaultOpen?: boolean; children: ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="seo-fold">
-      <button className="seo-fold__head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-        <Icon name={open ? "chevron-down" : "chevron-right"} size={14} />
-        <span className="seo-fold__title">{title}</span>
-        {count != null && count > 0 && <span className="seo-fold__count">{fmt(count)}</span>}
-        {hint && !open && <span className="seo-fold__hint">{hint}</span>}
-      </button>
-      {open && <div className="seo-fold__body">{children}</div>}
     </div>
   );
 }
@@ -383,7 +371,6 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
   const [brand, setBrand] = useState<SeoBrand | null>(null);
   const [run, setRun] = useState<SeoRun | null>(null);
   const [gsc, setGsc] = useState<SeoGscStatus | null>(null);
-  const [plan, setPlan] = useState<SeoPlanItem[]>([]);
   const [siteReview, setSiteReview] = useState<SeoSiteReview | null>(null);
   const [siteBusy, setSiteBusy] = useState(false);
   const [pagesDoc, setPagesDoc] = useState<SeoPagesDoc | null>(null);
@@ -395,12 +382,25 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
   const [vitalsDoc, setVitalsDoc] = useState<SeoVitalsDoc | null>(null);
   const [vitalsAvailable, setVitalsAvailable] = useState(false);
   const [poolDoc, setPoolDoc] = useState<SeoKeywordPoolDoc | null>(null);
+  /** Read only to answer "has Keyword Lab ever run for this brand?" — the pool
+   *  panel needs that to decide whether to nudge the user towards it. The lab
+   *  panel itself still owns its own copy. */
+  const [keywordLabDoc, setKeywordLabDoc] = useState<SeoKeywordLab | null>(null);
   /** The brand whose detail is being fetched right now, for the card's cue. */
   const [opening, setOpening] = useState<string | null>(null);
   const [tool, setTool] = useState<SeoTool | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showAllTodos, setShowAllTodos] = useState(false);
   const [showAvoided, setShowAvoided] = useState(false);
+  /** Which sidebar section is on screen. */
+  const [activeSection, setActiveSection] = useState<SectionId>("insights");
+
+  /** Routes to a section by id, falling back to Insights for anything that
+   *  isn't one of the nine known ids — the sidebar's own `onSelect` only ever
+   *  passes a real id, but `InsightsView`'s `onNavigate` passes whatever a
+   *  priority item's `action_link` says, which could be stale. */
+  const navigateToSection = useCallback((id: string) => {
+    setActiveSection(isSectionId(id) ? id : "insights");
+  }, []);
 
   const session = useLoadSession();
 
@@ -434,25 +434,27 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
     try {
       const detail = await seoBrandDetail(id, { signal: attempt.signal });
       if (!attempt.current()) return; // a newer brand owns the screen
+      window.history.pushState({ seoBrand: id }, "", window.location.href);
       setBrand(detail.brand);
       setRun(detail.run);
       setGsc(detail.gsc ?? null);
-      setPlan(detail.plan ?? []);
       setSiteReview(detail.site_review ?? null);
       setTool(null);
-      setShowAllTodos(false);
+      setActiveSection("insights");
       setPagesDoc(null);
       setPagesError(null);
       setSitemapDoc(null);
       setVitalsDoc(null);
       setPoolDoc(null);
+      setKeywordLabDoc(null);
       // Cheap stored reads, fired together — none of them touches the network
       // beyond this API, and a failure in one must not blank the others.
       void Promise.allSettled([
         seoSitemap(id, { signal: attempt.signal }),
         seoVitals(id, { signal: attempt.signal }),
         seoKeywordPool(id, { signal: attempt.signal }),
-      ]).then(([sm, vt, kp]) => {
+        seoKeywordLab(id, { signal: attempt.signal }),
+      ]).then(([sm, vt, kp, kl]) => {
         if (!attempt.current()) return;
         if (sm.status === "fulfilled") setSitemapDoc(sm.value.sitemap);
         if (vt.status === "fulfilled") {
@@ -460,6 +462,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
           setVitalsAvailable(vt.value.available);
         }
         if (kp.status === "fulfilled") setPoolDoc(kp.value.pool);
+        if (kl.status === "fulfilled") setKeywordLabDoc(kl.value.lab);
       });
       try {
         const pagesRes = await seoPages(id, { signal: attempt.signal });
@@ -510,7 +513,6 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
         setBrand(detail.brand);
         setRun(detail.run);
         setGsc(detail.gsc ?? null);
-        setPlan(detail.plan ?? []);
         setSiteReview(detail.site_review ?? null);
       }
       await refreshOverview();
@@ -536,12 +538,11 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
       const review = await seoAnalyzeSite(id);
       const detail = await seoBrandDetail(id);
       // A crawl takes minutes — long enough for the user to open another brand,
-      // whose fix list must not be replaced by this one's.
+      // whose review must not be replaced by this one's.
       if (shownBrandId.current !== id) return;
       setSiteReview(review);
       setRun(detail.run);
-      setPlan(detail.plan ?? []);
-      onToast(`Site review done — ${review.issues.length} finding(s) added to the fix list`);
+      onToast(`Site review done — ${review.issues.length} finding(s) in Website health`);
     } catch (e) {
       onToast(describeFailure(e, "Site analysis failed"), "error");
     } finally {
@@ -582,15 +583,19 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
     }
   }
 
-  async function setStatus(todoId: string, status: SeoTodoStatus) {
-    if (!brand || !run) return;
-    setRun({ ...run, todos: run.todos.map((t) => (t.id === todoId ? { ...t, status } : t)) });
-    try {
-      await seoSetTodoStatus(brand.id, todoId, status);
-    } catch (e) {
-      onToast(describeFailure(e, "Could not save status"), "error");
+  /** Opening a brand never used to touch browser history, so the back button
+   *  had nowhere in-app to go and left the whole console — this is what fixes
+   *  that. Opening a brand pushes one history entry; popping past it (system
+   *  back, or the in-app back button below routed through history.back()) is
+   *  the single path that closes the brand, via this listener. */
+  const closeBrand = useCallback(() => { setBrand(null); setRun(null); }, []);
+  useEffect(() => {
+    function onPopState(event: PopStateEvent) {
+      if (!(event.state as { seoBrand?: string } | null)?.seoBrand) closeBrand();
     }
-  }
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [closeBrand]);
 
   const sources = overview?.sources;
 
@@ -603,7 +608,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
         {brand ? (
           <button
             className="mr-top__back"
-            onClick={() => { setBrand(null); setRun(null); }}
+            onClick={() => window.history.back()}
             aria-label="Back to all brands"
           >
             <Icon name="arrow-left" size={18} />
@@ -630,7 +635,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
           <div className="mr-panel">
             <div className="mr-panel__head">
               <h2 className="mr-panel__title">Brands</h2>
-              <span className="mr-panel__sub">Every site we watch — open one for its fix list and blog topics.</span>
+              <span className="mr-panel__sub">Every site we watch — open one for its insights and blog topics.</span>
             </div>
             <div className="seo-grid">
               {(overview?.brands ?? []).map(({ brand: b, last_run, gsc_connected, headline }) => (
@@ -697,7 +702,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                   </button>
                 </div>
               ))}
-              {user?.is_creator && <AddBrandForm onSaved={() => void refreshOverview()} onToast={onToast} />}
+              <AddBrandForm onSaved={() => void refreshOverview()} onToast={onToast} />
             </div>
           </div>
         )}
@@ -708,7 +713,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
             good the moment any brand has been analysed once.
 
             Numbered, unusually: these three genuinely are a sequence — you
-            cannot review a fix list before the analysis that produces it — and
+            cannot review an insights list before the analysis that produces it — and
             the order is the useful part. */}
         {!brand && overview && overview.brands.length > 0 &&
          overview.brands.every((b) => !b.last_run) && (
@@ -726,7 +731,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
             <li className="seo-start__step">
               <span className="seo-start__n">2</span>
               <div>
-                <h3>Work the fix list</h3>
+                <h3>Work the Insights list</h3>
                 <p>
                   Findings come back ordered by the traffic each one stands to
                   win, so the top of the list is where to start.
@@ -791,307 +796,276 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
               healthFindings={siteReview ? siteReview.issues.length : null}
             />
 
-            {plan.length > 0 && (
-              <div className="seo-hero">
-                <div className="seo-hero__title">This week — do these {Math.min(plan.length, 3)}</div>
-                {plan.slice(0, 3).map((p, i) => (
-                  <div key={i} className="seo-hero__item">
-                    <span className="seo-hero__num">{i + 1}</span>
-                    <div className="seo-hero__body">
-                      <span className="seo-hero__action">{p.action}</span>
-                      <span className="seo-hero__detail">{p.detail}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
             {run && <DegradedNotes notes={run.degraded} domain={brand.domain} />}
 
-            {/* The rigorous audit sits first and open: it is the one section that
-                answers "what is wrong with this site, page by page", and the
-                folds below it are the older, narrower views. */}
-            <Fold title="Deep audit" defaultOpen
-                  hint="landing pages · sitemap · cannibalization · keyword density · page speed">
-              <DeepAuditPanel brandId={brand.id} onToast={onToast} />
-            </Fold>
-
-            {siteReview && (
-              <Fold title="Website health"
-                    hint={`${siteReview.issues.length} finding(s) · ${siteReview.page_count} pages read`}>
-              <div className="mr-section">
-                <h3 className="mr-section__title">What the expert review found · {siteReview.at}</h3>
-                {siteReview.positioning && <div className="seo-poa__action">{siteReview.positioning}</div>}
-                {siteReview.scorecard && Object.keys(siteReview.scorecard).length > 0 && (
-                  <div className="seo-cluster__kws">
-                    {Object.entries(siteReview.scorecard).map(([key, cell]) => {
-                      const label = {
-                        intent: "Intent", content_depth: "Content depth", architecture: "Architecture",
-                        trust: "Trust", conversion: "Conversion", ai_search: "AI search",
-                      }[key] ?? key;
-                      const cls = cell.grade >= 4 ? "seo-chip--on" : "";
-                      return (
-                        <span key={key} className={`seo-chip ${cls}`} title={cell.note}>
-                          {label} {cell.grade}/5
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                {siteReview.strengths.length > 0 && (
-                  <div className="seo-cluster__kws">
-                    {siteReview.strengths.map((s) => (
-                      <span key={s} className="seo-chip seo-chip--on">{s}</span>
-                    ))}
-                  </div>
-                )}
-                {siteReview.missing_topics.length > 0 && (
-                  <>
-                    <div className="seo-lab__meta">Topics the site doesn't cover yet — blog fuel:</div>
-                    <div className="seo-cluster__kws">
-                      {siteReview.missing_topics.map((t) => (
-                        <span key={t} className="seo-chip seo-chip--cov-gap">{t}</span>
-                      ))}
-                    </div>
-                  </>
-                )}
-                <div className="seo-lab__meta">
-                  Findings are in the Fix list with everything else — nothing to read twice.
+            {/* One section on screen at a time, chosen from the left rail.
+                Everything below is the same content the nine stacked folds
+                used to hold — only the wrapper changed. */}
+            <Shell sections={SECTIONS} activeId={activeSection} onSelect={navigateToSection}>
+              {activeSection === "insights" && (
+                <div className="seo-section">
+                  <InsightsView brandId={brand.id} onToast={onToast} onNavigate={navigateToSection} />
                 </div>
-              </div>
-              </Fold>
-            )}
+              )}
 
-            {run && (
-              <Fold title="Traffic & rankings"
-                    hint={run.ga
-                      ? `${fmt(run.ga.totals.sessions)} visits · ${fmt(run.ga.key_events.find((e) => e.event === "generate_lead")?.count ?? 0)} leads`
-                      : run.summary.mode === "rank-tracking"
-                        ? `${run.summary.top10 ?? 0}/${run.summary.tracked ?? 0} keywords on page 1`
-                        : `${fmt(run.summary.clicks_28d)} clicks from Google`}>
-                {run.summary.mode === "rank-tracking" ? (
-                  <div className="seo-summary">
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Tracked keywords</span>
-                      <span className="seo-stat__num">{run.summary.tracked ?? 0}</span>
+              {activeSection === "traffic" && (
+                <div className="seo-section">
+                  {!run ? (
+                    <div className="seo-empty">
+                      No analysis yet — hit “Refresh data” above and this fills in.
                     </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Top 3</span>
-                      <span className="seo-stat__num seo-stat__num--good">{run.summary.top3 ?? 0}</span>
-                    </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Page 1</span>
-                      <span className="seo-stat__num">{run.summary.top10 ?? 0}</span>
-                    </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Not ranking</span>
-                      <span className="seo-stat__num">{run.summary.unranked ?? 0}</span>
-                    </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Since last check</span>
-                      <span className="seo-stat__num">
-                        {(run.summary.moved_up ?? 0) > 0 && (
-                          <span className="seo-delta seo-delta--up">
-                            <Icon name="trending-up" size={13} />{run.summary.moved_up}
-                          </span>
-                        )}
-                        {(run.summary.moved_down ?? 0) > 0 && (
-                          <span className="seo-delta seo-delta--down">
-                            <Icon name="trending-down" size={13} />{run.summary.moved_down}
-                          </span>
-                        )}
-                        {!(run.summary.moved_up || run.summary.moved_down) && "steady"}
-                      </span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="seo-summary">
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Clicks · 28d</span>
-                      <span className="seo-stat__num">
-                        {fmt(run.summary.clicks_28d)}
-                        <Delta now={run.summary.clicks_28d} prev={run.summary.clicks_prev_28d} />
-                      </span>
-                    </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Impressions · 28d</span>
-                      <span className="seo-stat__num">{fmt(run.summary.impressions_28d)}</span>
-                    </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Avg. position</span>
-                      <span className="seo-stat__num">{run.summary.avg_position || "—"}</span>
-                    </div>
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Est. upside if fixed</span>
-                      <span className="seo-stat__num seo-stat__num--good">+{fmt(run.summary.est_potential_clicks)}/mo</span>
-                    </div>
-                  </div>
-                )}
-
-                {run.ga && <GaSection ga={run.ga} />}
-
-                {run.insights.length > 0 && (
-                  <div className="mr-section">
-                    <h3 className="mr-section__title">What changed</h3>
-                    <ul className="seo-insights">
-                      {run.insights.map((line, i) => <li key={i}>{line}</li>)}
-                    </ul>
-                  </div>
-                )}
-              </Fold>
-            )}
-
-            <Fold title="Pages" count={pagesDoc?.pages.length} hint="traffic + health, page by page">
-              <PagesView doc={pagesDoc} busy={pagesBusy} error={pagesError}
-                onRefresh={() => void refreshPages(brand.id)} />
-            </Fold>
-
-            <Fold title="Competitors" hint="top 5 — and what they publish">
-              <CompetitorsView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
-            </Fold>
-
-            <Fold title="Core Web Vitals"
-                  hint={
-                    vitalsDoc?.origin_vitals?.mobile
-                      ? `mobile · ${vitalsDoc.origin_vitals.mobile.assessment}`
-                      : "real Chrome field data"
-                  }>
-              <VitalsView brandId={brand.id} doc={vitalsDoc} available={vitalsAvailable}
-                          onLoaded={setVitalsDoc} onToast={onToast} />
-            </Fold>
-
-            <Fold title="Keyword pool"
-                  count={poolDoc?.totals.keywords}
-                  hint={poolDoc ? `+${poolDoc.totals.opportunity} est. clicks within reach` : "every keyword in one table"}>
-              <KeywordPoolView brandId={brand.id} doc={poolDoc} onLoaded={setPoolDoc} onToast={onToast} />
-            </Fold>
-
-            <Fold title="More tools" hint="ask · keyword lab · briefs · audit">
-              <div className="seo-cluster__kws">
-                {(Object.keys(TOOL_LABELS) as SeoTool[]).map((t) => (
-                  <button key={t} className={`seo-chip${tool === t ? " seo-chip--on" : ""}`}
-                          onClick={() => setTool(tool === t ? null : t)}>
-                    {TOOL_LABELS[t]}
-                  </button>
-                ))}
-              </div>
-              {tool === "ask" && <AskView brandId={brand.id} brandName={brand.name} />}
-              {tool === "keywords" && <KeywordsView brandId={brand.id} onToast={onToast} />}
-              {tool === "briefs" && <BriefsView brandId={brand.id} onToast={onToast} />}
-              {tool === "audit" && <AuditView brandId={brand.id} brandName={brand.name} onToast={onToast} />}
-            </Fold>
-
-            {run && (
-              <>
-                <Fold title="Fix list" count={run.todos.length} hint="every fix, biggest win first">
-                {(
-                  <div className="mr-section">
-                    <h3 className="mr-section__title">
-                      {run.summary.mode === "rank-tracking"
-                        ? "Top 10 actions — from live rankings (drops first)"
-                        : "Top 10 actions — biggest estimated gain first"}
-                    </h3>
-                    {run.todos.length === 0 && <div className="seo-empty">Nothing above the impact threshold — refresh after the next content push.</div>}
-                    {(showAllTodos ? run.todos : run.todos.slice(0, 10)).map((t, i) => (
-                      <div key={t.id} className={`seo-todo${t.status === "done" ? " seo-todo--done" : ""}`}>
-                        <span className="seo-todo__rank">{i + 1}</span>
-                        {t.est_monthly_clicks != null ? (
-                          <div className="seo-todo__gain">+{fmt(t.est_monthly_clicks)}<small>est. clicks/mo</small></div>
-                        ) : (
-                          <div className="seo-todo__gain seo-todo__gain--pos">
-                            {t.position > 0 ? `#${t.position}` : "—"}
-                            <small>{t.position > 0 ? "current pos" : t.kind === "site" ? "site fix" : "not ranked"}</small>
+                  ) : (
+                    <>
+                      {run.summary.mode === "rank-tracking" ? (
+                        <div className="seo-summary">
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Tracked keywords</span>
+                            <span className="seo-stat__num">{run.summary.tracked ?? 0}</span>
                           </div>
-                        )}
-                        <div className="seo-todo__body">
-                          <div className="seo-todo__action">{t.action}</div>
-                          <div className="seo-todo__why">{t.why}</div>
-                          <div className="seo-todo__meta">
-                            {!!t.page && <span>{shortPage(t.page)}</span>}
-                            {t.est_monthly_clicks != null && t.position > 0 && <span>pos {t.position}</span>}
-                            {t.impressions != null && <span>{fmt(t.impressions)} impressions</span>}
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Top 3</span>
+                            <span className="seo-stat__num seo-stat__num--good">{run.summary.top3 ?? 0}</span>
                           </div>
-                          {t.kind === "decay" && (
-                            <UpdatePlanButton brandId={brand.id} page={t.page} onToast={onToast} />
-                          )}
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Page 1</span>
+                            <span className="seo-stat__num">{run.summary.top10 ?? 0}</span>
+                          </div>
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Not ranking</span>
+                            <span className="seo-stat__num">{run.summary.unranked ?? 0}</span>
+                          </div>
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Since last check</span>
+                            <span className="seo-stat__num">
+                              {(run.summary.moved_up ?? 0) > 0 && (
+                                <span className="seo-delta seo-delta--up">
+                                  <Icon name="trending-up" size={13} />{run.summary.moved_up}
+                                </span>
+                              )}
+                              {(run.summary.moved_down ?? 0) > 0 && (
+                                <span className="seo-delta seo-delta--down">
+                                  <Icon name="trending-down" size={13} />{run.summary.moved_down}
+                                </span>
+                              )}
+                              {!(run.summary.moved_up || run.summary.moved_down) && "steady"}
+                            </span>
+                          </div>
                         </div>
-                        <select className={`seo-status seo-status--${t.status}`} value={t.status}
-                                onChange={(e) => void setStatus(t.id, e.target.value as SeoTodoStatus)}>
-                          <option value="todo">To do</option>
-                          <option value="assigned">Assigned</option>
-                          <option value="done">Done</option>
-                        </select>
-                      </div>
-                    ))}
-                    {run.todos.length > 10 && (
-                      <button className="seo-btn seo-todo__more" onClick={() => setShowAllTodos((v) => !v)}>
-                        {showAllTodos ? "Show top 10 only" : `Show all ${run.todos.length}`}
-                      </button>
-                    )}
-                  </div>
-                )}
-                </Fold>
-
-                <Fold title="Blog plan" count={run.topics.filter((t) => !t.avoided).length}
-                      hint="the next posts to publish">
-                {(() => {
-                  const liveTopics = run.topics.filter((t) => !t.avoided);
-                  const avoidedTopics = run.topics.filter((t) => t.avoided);
-                  return (
-                    <div className="mr-section">
-                      <h3 className="mr-section__title">Next 10 blogs to publish</h3>
-                      {liveTopics.length === 0 && avoidedTopics.length === 0 && (
-                        <div className="seo-empty">No topics yet — add seed keywords to this brand and refresh.</div>
-                      )}
-                      {liveTopics.map((t, i) => (
-                        <div key={t.keyword} className="seo-topic">
-                          <div className="seo-topic__main">
-                            <span className="seo-topic__kw"><span className="seo-topic__num">{i + 1}</span> {t.keyword}</span>
-                            <div className="seo-topic__chips">
-                              <span className={`seo-chip seo-chip--tier-${t.priority === "high" ? "high" : t.priority === "medium" ? "medium" : "watch"}`}>
-                                {t.priority} priority
-                              </span>
-                              {t.source === "new idea" && <span className="seo-chip seo-chip--trend-new">new idea</span>}
-                              <span className="seo-chip">{t.angle}</span>
-                              {t.intent && <span className="seo-chip">{t.intent}</span>}
-                              <TrendChip trend={t.trend} />
-                              <DifficultyChip difficulty={t.difficulty} />
-                            </div>
-                            <div className="seo-topic__why">{t.why}</div>
-                            <div className="seo-topic__impact">{t.impact}</div>
+                      ) : (
+                        <div className="seo-summary">
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Clicks · 28d</span>
+                            <span className="seo-stat__num">
+                              {fmt(run.summary.clicks_28d)}
+                              <Delta now={run.summary.clicks_28d} prev={run.summary.clicks_prev_28d} />
+                            </span>
                           </div>
-                          <div className="seo-topic__nums">
-                            <span className="seo-topic__vol">{t.volume_label}</span>
-                            {t.est_monthly_clicks != null && (
-                              <span className="seo-stat__num--good">≈ +{fmt(t.est_monthly_clicks)} clicks/mo</span>
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Impressions · 28d</span>
+                            <span className="seo-stat__num">{fmt(run.summary.impressions_28d)}</span>
+                          </div>
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Avg. position</span>
+                            <span className="seo-stat__num">{run.summary.avg_position || "—"}</span>
+                          </div>
+                          <div className="seo-stat">
+                            <span className="seo-stat__label">Est. upside if fixed</span>
+                            <span className="seo-stat__num seo-stat__num--good">+{fmt(run.summary.est_potential_clicks)}/mo</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {run.ga && <GaSection ga={run.ga} />}
+
+                      {run.insights.length > 0 && (
+                        <div className="mr-section">
+                          <h3 className="mr-section__title">What changed</h3>
+                          <ul className="seo-insights">
+                            {run.insights.map((line, i) => <li key={i}>{line}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
+              {activeSection === "health" && (
+                <div className="seo-section">
+                  {!siteReview ? (
+                    <div className="seo-empty">
+                      No expert review yet — hit “Analyze website” above to crawl the
+                      site and score it.
+                    </div>
+                  ) : (
+                    <div className="mr-section">
+                      <h3 className="mr-section__title">What the expert review found · {siteReview.at}</h3>
+                      {siteReview.positioning && <div className="seo-poa__action">{siteReview.positioning}</div>}
+                      {siteReview.scorecard && Object.keys(siteReview.scorecard).length > 0 && (
+                        <div className="seo-cluster__kws">
+                          {Object.entries(siteReview.scorecard).map(([key, cell]) => {
+                            const label = {
+                              intent: "Intent", content_depth: "Content depth", architecture: "Architecture",
+                              trust: "Trust", conversion: "Conversion", ai_search: "AI search",
+                            }[key] ?? key;
+                            const cls = cell.grade >= 4 ? "seo-chip--on" : "";
+                            return (
+                              <span key={key} className={`seo-chip ${cls}`} title={cell.note}>
+                                {label} {cell.grade}/5
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {siteReview.strengths.length > 0 && (
+                        <div className="seo-cluster__kws">
+                          {siteReview.strengths.map((s) => (
+                            <span key={s} className="seo-chip seo-chip--on">{s}</span>
+                          ))}
+                        </div>
+                      )}
+                      {siteReview.missing_topics.length > 0 && (
+                        <>
+                          <div className="seo-lab__meta">Topics the site doesn&apos;t cover yet — blog fuel:</div>
+                          <div className="seo-cluster__kws">
+                            {siteReview.missing_topics.map((t) => (
+                              <span key={t} className="seo-chip seo-chip--cov-gap">{t}</span>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      <div className="seo-lab__meta">
+                        Findings are ranked with everything else in Insights — nothing to read twice.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeSection === "keywords" && (
+                <div className="seo-section">
+                  <KeywordPoolView
+                    brandId={brand.id}
+                    doc={poolDoc}
+                    gscConnected={!!gsc?.connected}
+                    keywordLabRun={!!keywordLabDoc}
+                    onLoaded={setPoolDoc}
+                    onToast={onToast}
+                  />
+
+                  <KeywordsView brandId={brand.id} onToast={onToast} />
+
+                  {run && (() => {
+                    const liveTopics = run.topics.filter((t) => !t.avoided);
+                    const avoidedTopics = run.topics.filter((t) => t.avoided);
+                    return (
+                      <div className="mr-section">
+                        <h3 className="mr-section__title">Next 10 blogs to publish</h3>
+                        {liveTopics.length === 0 && avoidedTopics.length === 0 && (
+                          <div className="seo-empty">No topics yet — add seed keywords to this brand and refresh.</div>
+                        )}
+                        {liveTopics.map((t, i) => (
+                          <div key={t.keyword} className="seo-topic">
+                            <div className="seo-topic__main">
+                              <span className="seo-topic__kw"><span className="seo-topic__num">{i + 1}</span> {t.keyword}</span>
+                              <div className="seo-topic__chips">
+                                <span className={`seo-chip seo-chip--tier-${t.priority === "high" ? "high" : t.priority === "medium" ? "medium" : "watch"}`}>
+                                  {t.priority} priority
+                                </span>
+                                {t.source === "new idea" && <span className="seo-chip seo-chip--trend-new">new idea</span>}
+                                <span className="seo-chip">{t.angle}</span>
+                                {t.intent && <span className="seo-chip">{t.intent}</span>}
+                                <TrendChip trend={t.trend} />
+                                <DifficultyChip difficulty={t.difficulty} />
+                              </div>
+                              <div className="seo-topic__why">{t.why}</div>
+                              <div className="seo-topic__impact">{t.impact}</div>
+                            </div>
+                            <div className="seo-topic__nums">
+                              <span className="seo-topic__vol">{t.volume_label}</span>
+                              {t.est_monthly_clicks != null && (
+                                <span className="seo-stat__num--good">≈ +{fmt(t.est_monthly_clicks)} clicks/mo</span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                        {avoidedTopics.length > 0 && (
+                          <div className="seo-avoided">
+                            <button className="seo-btn seo-avoided__toggle" onClick={() => setShowAvoided((v) => !v)}>
+                              <Icon name={showAvoided ? "chevron-down" : "chevron-right"} size={13} />
+                              Avoided (would cannibalize existing pages) · {avoidedTopics.length}
+                            </button>
+                            {showAvoided && (
+                              <div className="seo-avoided__list">
+                                {avoidedTopics.map((t) => (
+                                  <div key={t.keyword} className="seo-avoided__row">
+                                    <span className="seo-topic__kw">{t.keyword}</span>
+                                    <span className="seo-avoided__reason">{t.avoided_reason ?? "overlaps an existing page"}</span>
+                                  </div>
+                                ))}
+                              </div>
                             )}
                           </div>
-                        </div>
-                      ))}
-                      {avoidedTopics.length > 0 && (
-                        <div className="seo-avoided">
-                          <button className="seo-btn seo-avoided__toggle" onClick={() => setShowAvoided((v) => !v)}>
-                            <Icon name={showAvoided ? "chevron-down" : "chevron-right"} size={13} />
-                            Avoided (would cannibalize existing pages) · {avoidedTopics.length}
-                          </button>
-                          {showAvoided && (
-                            <div className="seo-avoided__list">
-                              {avoidedTopics.map((t) => (
-                                <div key={t.keyword} className="seo-avoided__row">
-                                  <span className="seo-topic__kw">{t.keyword}</span>
-                                  <span className="seo-avoided__reason">{t.avoided_reason ?? "overlaps an existing page"}</span>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
-                </Fold>
-              </>
-            )}
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {activeSection === "competitors" && (
+                <div className="seo-section">
+                  <CompetitorsView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
+                </div>
+              )}
+
+              {activeSection === "vitals" && (
+                <div className="seo-section">
+                  <VitalsView brandId={brand.id} doc={vitalsDoc} available={vitalsAvailable}
+                              onLoaded={setVitalsDoc} onToast={onToast} />
+                </div>
+              )}
+
+              {activeSection === "deep-audit" && (
+                <div className="seo-section">
+                  <DeepAuditPanel brandId={brand.id} onToast={onToast} />
+                </div>
+              )}
+
+              {activeSection === "pages" && (
+                <div className="seo-section">
+                  <PagesView doc={pagesDoc} busy={pagesBusy} error={pagesError}
+                    onRefresh={() => void refreshPages(brand.id)} />
+                </div>
+              )}
+
+              {activeSection === "tools" && (
+                <div className="seo-section">
+                  <div className="seo-cluster__kws">
+                    {(Object.keys(TOOL_LABELS) as SeoTool[]).map((t) => (
+                      <button key={t} className={`seo-chip${tool === t ? " seo-chip--on" : ""}`}
+                              onClick={() => setTool(tool === t ? null : t)}>
+                        {TOOL_LABELS[t]}
+                      </button>
+                    ))}
+                  </div>
+                  {tool === "ask" && <AskView brandId={brand.id} brandName={brand.name} />}
+                  {tool === "briefs" && <BriefsView brandId={brand.id} onToast={onToast} />}
+                  {tool === "audit" && <AuditView brandId={brand.id} brandName={brand.name} onToast={onToast} />}
+                </div>
+              )}
+
+              {/* Defense in depth alongside the SectionId union and
+                  navigateToSection's runtime clamp above: if activeSection
+                  somehow matches none of the nine ids, fall back to Insights
+                  instead of rendering a blank pane with no sidebar item
+                  marked active. */}
+              {!SECTIONS.some((s) => s.id === activeSection) && (
+                <div className="seo-section">
+                  <InsightsView brandId={brand.id} onToast={onToast} onNavigate={navigateToSection} />
+                </div>
+              )}
+            </Shell>
           </div>
         )}
       </div>

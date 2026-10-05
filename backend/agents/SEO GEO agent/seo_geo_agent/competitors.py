@@ -37,16 +37,72 @@ def tracked_keywords(brand: dict) -> list[str]:
     return out[:MAX_TRACKED]
 
 
+MAX_RANK_POOL = 50
+
+
+def rank_tracking_pool(brand: dict) -> list[str]:
+    """Custom queries first (explicit user intent), then the existing
+    auto-derived seeds+cluster-heads, then keyword_pool's top-opportunity
+    terms — deduplicated case-insensitively, capped at MAX_RANK_POOL so a
+    brand with a big keyword pool can't blow the Serper budget on one click."""
+    from . import keyword_pool as kw_pool
+
+    custom = list_custom_queries(brand["id"])
+    auto = tracked_keywords(brand)
+    pool_doc = kw_pool.latest(brand["id"]) or {}
+    pool_items = sorted(
+        pool_doc.get("keywords", []), key=lambda k: k.get("opportunity", 0), reverse=True
+    )
+    pool_terms = [k["keyword"] for k in pool_items if k.get("keyword")]
+
+    out: list[str] = []
+    for kw in custom + auto + pool_terms:
+        if kw.lower() not in [o.lower() for o in out]:
+            out.append(kw)
+    return out[:MAX_RANK_POOL]
+
+
+MAX_CUSTOM_QUERY_LEN = 200
+MAX_CUSTOM_QUERIES = 50
+
+
+def list_custom_queries(brand_id: str) -> list[str]:
+    doc = state.load(f"custom-queries-{brand_id}")
+    return (doc or {}).get("queries", [])
+
+
+def add_custom_query(brand_id: str, query: str) -> list[str]:
+    query = query.strip()
+    if not query:
+        raise ValueError("Query must not be empty")
+    if len(query) > MAX_CUSTOM_QUERY_LEN:
+        raise ValueError(f"Query must be {MAX_CUSTOM_QUERY_LEN} characters or fewer")
+    existing = list_custom_queries(brand_id)
+    if query.lower() not in [q.lower() for q in existing]:
+        if len(existing) >= MAX_CUSTOM_QUERIES:
+            raise ValueError(f"You can track at most {MAX_CUSTOM_QUERIES} custom queries")
+        existing = existing + [query]
+    state.save(f"custom-queries-{brand_id}", {"queries": existing})
+    return existing
+
+
+def remove_custom_query(brand_id: str, query: str) -> list[str]:
+    query = query.strip().lower()
+    remaining = [q for q in list_custom_queries(brand_id) if q.lower() != query]
+    state.save(f"custom-queries-{brand_id}", {"queries": remaining})
+    return remaining
+
+
 def rank_snapshot(brand: dict, search=None) -> dict:
     """Record where we rank today for every tracked keyword, and which domains
     keep showing up above us (competitor discovery)."""
     if search is None:
-        if not sources.serper_available():
+        if not sources.brand_rank_available():
             raise CredentialMissing("Serper key missing — rank tracking needs live SERPs")
-        search = sources.serper_search
+        search = sources.brand_rank_search
     ranks: dict[str, dict] = {}
     seen_domains: dict[str, int] = {}
-    for kw in tracked_keywords(brand):
+    for kw in rank_tracking_pool(brand):
         serp = search(kw)
         ours = next(
             (r["position"] for r in serp["organic"] if brand["domain"] in r["link"]), None

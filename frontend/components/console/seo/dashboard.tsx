@@ -18,7 +18,7 @@
 
 import { useCallback, useState } from "react";
 import {
-  seoKeywordPool, seoKeywordPoolRefresh,
+  seoKeywordPool, seoKeywordPoolRefresh, seoOauthStart,
   seoVitals, seoVitalsRefresh,
   type SeoKeywordPoolDoc, type SeoPoolKeyword,
   type SeoSitemapDoc, type SeoVitalMetric, type SeoVitalsDoc, type SeoVitalsSlice,
@@ -273,9 +273,11 @@ const BAND_LABEL: Record<string, string> = {
   unranked: "Not ranking",
 };
 
-export function KeywordPoolView({ brandId, doc, onLoaded, onToast }: {
+export function KeywordPoolView({ brandId, doc, gscConnected, keywordLabRun, onLoaded, onToast }: {
   brandId: string;
   doc: SeoKeywordPoolDoc | null;
+  gscConnected?: boolean;
+  keywordLabRun?: boolean;
   onLoaded: (d: SeoKeywordPoolDoc) => void;
   onToast: ToastFn;
 }) {
@@ -298,6 +300,40 @@ export function KeywordPoolView({ brandId, doc, onLoaded, onToast }: {
     }
   }, [brandId, onLoaded, onToast]);
 
+  const connectGsc = useCallback(async () => {
+    try {
+      const { url } = await seoOauthStart(brandId);
+      window.open(url, "_blank", "width=540,height=680");
+      onToast("Choose the Google account that owns the site's Search Console, press Allow, then hit Refresh data here.");
+    } catch (e) {
+      onToast(describeFailure(e, "Could not start the Google connect"), "error");
+    }
+  }, [brandId, onToast]);
+
+  // Keyword Lab is an LLM-cost operation, so it never auto-triggers from here —
+  // this only points the user at the real control, which sits directly below
+  // this panel in the console's Keywords section ("Keyword map" → "Map
+  // keywords" in SeoAgent.tsx), matching the exact heading/button labels.
+  const missingSources: { key: string; label: string; hint: string; cta: string; onClick: () => void }[] = [];
+  if (!gscConnected) {
+    missingSources.push({
+      key: "gsc",
+      label: "Search Console not connected",
+      hint: "This is usually the largest source of real keyword volume.",
+      cta: "Connect Search Console",
+      onClick: () => void connectGsc(),
+    });
+  }
+  if (!keywordLabRun) {
+    missingSources.push({
+      key: "lab",
+      label: "Keyword Lab has not been run yet",
+      hint: "Clustering adds every mapped keyword to this pool.",
+      cta: "Run Keyword Lab",
+      onClick: () => onToast("Scroll down to “Keyword map”, just below this table, and click “Map keywords”."),
+    });
+  }
+
   const rows: SeoPoolKeyword[] = (doc?.keywords ?? []).filter((k) =>
     (band === "all" || k.band === band) &&
     (cluster === "all" || k.cluster === cluster) &&
@@ -315,6 +351,18 @@ export function KeywordPoolView({ brandId, doc, onLoaded, onToast }: {
           <Icon name="refresh-cw" size={13} /> {doc ? "Rebuild" : "Build pool"}
         </button>
       </div>
+
+      {missingSources.map((s) => (
+        <div key={s.key} className="seo-degraded">
+          <Icon name="alert-triangle" size={14} />
+          <div>
+            <div><strong>{s.label}.</strong> {s.hint}</div>
+            <button className="seo-btn" onClick={s.onClick}>
+              {s.cta}
+            </button>
+          </div>
+        </div>
+      ))}
 
       {!doc ? (
         <div className="seo-empty">

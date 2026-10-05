@@ -28,6 +28,7 @@ from seo_geo_agent import briefs as seo_briefs
 from seo_geo_agent import competitors as seo_competitors
 from seo_geo_agent import insights, keyword_pool as seo_kwpool, keywords as seo_keywords, sources
 from seo_geo_agent import pages as seo_pages
+from seo_geo_agent import priorities as seo_priorities
 from seo_geo_agent import sitemap_health as seo_sitemap
 from seo_geo_agent import cannibalization as seo_cannibal
 from seo_geo_agent import deep_audit as seo_deep
@@ -71,6 +72,10 @@ class TodoStatusIn(BaseModel):
 
 class CompetitorsIn(BaseModel):
     domains: list[str]
+
+
+class CustomQueryIn(BaseModel):
+    query: str
 
 
 class QueryIn(BaseModel):
@@ -148,7 +153,7 @@ def overview(user=Depends(get_current_user)):
 
 
 @router.post("/seo-geo/brands")
-def save_brand(payload: BrandIn, user=Depends(require_creator),
+def save_brand(payload: BrandIn, user=Depends(get_current_user),
                act: Activity = trail.records("brand_saved", "Saved a brand", unit=CHANGE)):
     # Shared with the GEO editor's self-serve create route: one answer to "what
     # is a valid brand id / domain", in the module that owns brand records. The
@@ -323,6 +328,9 @@ def get_competitors(brand_id: str, user=Depends(get_current_user)):
         "suggested": ranks_doc.get("suggested_competitors", []),
         "shifts": seo_competitors.rank_shifts(brand_id),
         "feed": sitemap_doc.get("last_feed", {}),
+        "custom_queries": seo_competitors.list_custom_queries(brand_id),
+        "pool_size": len(seo_competitors.rank_tracking_pool(brand)),
+        "pool_cap": seo_competitors.MAX_RANK_POOL,
     }
 
 
@@ -356,6 +364,29 @@ def track_competitors(brand_id: str, user=Depends(get_current_user),
     except CredentialMissing as exc:
         degraded.append(f"Sitemap watch: {exc}")
     return {"shifts": seo_competitors.rank_shifts(brand_id), "feed": feed, "degraded": degraded}
+
+
+@router.post("/seo-geo/competitors/{brand_id}/custom-queries")
+def add_custom_query(brand_id: str, payload: CustomQueryIn, user=Depends(require_creator),
+                     act: Activity = trail.records("custom_query_added", "Added a custom rank-tracking query")):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    try:
+        queries = seo_competitors.add_custom_query(brand_id, payload.query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    act.note(f"Added query “{payload.query.strip()}” ({len(queries)} custom queries total)")
+    return {"custom_queries": queries, "pool_size": len(seo_competitors.rank_tracking_pool(brand))}
+
+
+@router.delete("/seo-geo/competitors/{brand_id}/custom-queries")
+def remove_custom_query(brand_id: str, payload: CustomQueryIn, user=Depends(require_creator),
+                        act: Activity = trail.records("custom_query_removed", "Removed a custom rank-tracking query")):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    queries = seo_competitors.remove_custom_query(brand_id, payload.query)
+    act.note(f"Removed query “{payload.query.strip()}” ({len(queries)} custom queries remain)")
+    return {"custom_queries": queries, "pool_size": len(seo_competitors.rank_tracking_pool(brand))}
 
 
 @router.post("/seo-geo/serp/{brand_id}")
@@ -636,6 +667,22 @@ def refresh_keyword_pool(brand_id: str, user=Depends(get_current_user),
     doc = seo_kwpool.build(brand, rows, topics=run.get("topics") or [], notes=notes)
     act.note(f"Pooled {doc['totals']['keywords']} keywords for {brand['domain']}")
     return {"pool": doc}
+
+
+@router.get("/seo-geo/priorities/{brand_id}")
+def get_priorities(brand_id: str, user=Depends(get_current_user)):
+    _brand_or_404(brand_id)
+    return {"priorities": seo_priorities.latest(brand_id)}
+
+
+@router.post("/seo-geo/priorities/{brand_id}/refresh")
+def refresh_priorities(brand_id: str, user=Depends(get_current_user),
+                       act: Activity = trail.records("priorities", "Rebuilt the priority list")):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    doc = seo_priorities.build(brand_id)
+    act.note(f"Built {len(doc['items'])} priority items for {brand['domain']}")
+    return {"priorities": doc}
 
 
 # ------------------------------- deep audit -------------------------------

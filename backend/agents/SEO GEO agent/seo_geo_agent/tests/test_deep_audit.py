@@ -588,13 +588,16 @@ def test_near_duplicates_are_exact_jaccard():
 # --------------------------------------------------------------------------- #
 
 def test_chunked_list_round_trips_and_a_shrinking_save_drops_the_old_tail():
-    items = [{"i": i} for i in range(jobs.CHUNK * 2 + 5)]
+    # Padded so a handful of items already cross MAX_CHUNK_BYTES and force more
+    # than one chunk — chunking is by measured size now, not a fixed count.
+    pad = "x" * 300_000
+    items = [{"i": i, "pad": pad} for i in range(7)]
     jobs.save_list("t", items)
     got, meta = jobs.load_list("t")
-    assert got == items and meta["chunks"] == 3
-    jobs.save_list("t", items[:3])
+    assert got == items and meta["chunks"] > 1
+    jobs.save_list("t", items[:2])
     got, meta = jobs.load_list("t")
-    assert got == items[:3] and meta["chunks"] == 1
+    assert got == items[:2] and meta["chunks"] == 1
 
 
 # --------------------------------------------------------------------------- #

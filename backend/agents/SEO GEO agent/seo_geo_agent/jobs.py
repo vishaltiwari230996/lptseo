@@ -21,6 +21,7 @@ so the cloud backend is not a separate, untested branch.
 """
 from __future__ import annotations
 
+import json
 import threading
 import time
 import traceback
@@ -29,9 +30,14 @@ from typing import Any, Callable
 
 from . import state
 
-#: Records per chunk. Sized well under Firestore's 1MB document limit for the
-#: largest record shape here (a landing page with ~40 findings).
-CHUNK = 120
+#: Target bytes per chunk, well under Firestore's 1_048_576 document limit.
+#: A fixed records-per-chunk count (the previous approach) assumed a worst-case
+#: record shape that held for landing-audit findings but not for crawl records:
+#: a page's deduped ``internal_links`` list repeats the site's whole nav/footer
+#: on every single page, so a content-heavy site's crawl chunk can run several
+#: times bigger than a findings-only chunk at the same record count. Packing by
+#: measured size is correct regardless of what any given record shape holds.
+MAX_CHUNK_BYTES = 800_000
 
 #: Guards the registry of running threads. Re-entrant as a safety net, but no
 #: code path should need that: see `start`, which must never call `status`
@@ -48,6 +54,25 @@ def _now() -> str:
 # Chunked lists
 # --------------------------------------------------------------------------- #
 
+def _pack_by_size(items: list[dict]) -> list[list[dict]]:
+    """Group ``items`` into chunks whose serialized size stays under
+    ``MAX_CHUNK_BYTES``. A single item bigger than that on its own still gets
+    saved alone rather than blocking the rest of the list."""
+    chunks: list[list[dict]] = []
+    current: list[dict] = []
+    current_bytes = 0
+    for item in items:
+        size = len(json.dumps(item, default=str))
+        if current and current_bytes + size > MAX_CHUNK_BYTES:
+            chunks.append(current)
+            current, current_bytes = [], 0
+        current.append(item)
+        current_bytes += size
+    if current or not chunks:
+        chunks.append(current)
+    return chunks
+
+
 def save_list(prefix: str, items: list[dict], *, meta: dict | None = None) -> None:
     """Persist ``items`` as ``{prefix}-0``, ``{prefix}-1``… plus ``{prefix}-meta``.
 
@@ -57,7 +82,7 @@ def save_list(prefix: str, items: list[dict], *, meta: dict | None = None) -> No
     back with stale tail entries.
     """
     old = state.load(f"{prefix}-meta") or {}
-    chunks = [items[i:i + CHUNK] for i in range(0, len(items), CHUNK)] or [[]]
+    chunks = _pack_by_size(items)
     for n, part in enumerate(chunks):
         state.save(f"{prefix}-{n}", {"items": part})
     for n in range(len(chunks), int(old.get("chunks", 0))):

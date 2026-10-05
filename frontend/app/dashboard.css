@@ -19,7 +19,17 @@
 /* Five at a glance. Tone is carried by a left rule and the figure's colour,
    never a filled background — five filled cards in a row is a traffic jam, and
    it makes the one that needs attention harder to find, not easier. A tile with
-   no data is explicitly neutral: "unknown" and "pass" must not look alike. */
+   no data is explicitly neutral: "unknown" and "pass" must not look alike.
+
+   Card treatment (Task 9): border/radius/background now match the sidebar and
+   insights-panel cards from Tasks 6-7 — `1px solid var(--border)` (not the
+   fainter `--border-subtle` this used before) plus `var(--radius-lg)`, the
+   same pairing `.seo-sidebar__item`/`.seo-insights-panel__item` use, so every
+   card-like block in the dashboard reads as one family. The left-rule tone
+   uses the semantic status tokens (`--danger`/`--warning`/`--success`) rather
+   than the raw `--red-500`/`--amber-500`/`--green-500` ramp they alias to —
+   same colour, but named the way the rest of the "restrained accent" surfaces
+   are. */
 .seo-app .seo-tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
@@ -31,14 +41,14 @@
   align-content: start;
   padding: 14px 16px;
   background: var(--surface-card);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-left: 3px solid var(--border);
   border-radius: var(--radius-lg);
   min-width: 0;
 }
-.seo-app .seo-tile--good { border-left-color: var(--green-500); }
-.seo-app .seo-tile--warn { border-left-color: var(--amber-500); }
-.seo-app .seo-tile--bad  { border-left-color: var(--red-500); }
+.seo-app .seo-tile--good { border-left-color: var(--success); }
+.seo-app .seo-tile--warn { border-left-color: var(--warning); }
+.seo-app .seo-tile--bad  { border-left-color: var(--danger); }
 
 .seo-app .seo-tile__label {
   font: 600 12px/1.3 var(--font-sans);
@@ -65,7 +75,7 @@
   gap: 12px 20px;
   padding: 14px 16px;
   background: var(--surface-card);
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
 }
 .seo-app .seo-kv > div { display: grid; gap: 3px; min-width: 0; }
@@ -83,7 +93,8 @@
   gap: 12px;
   align-items: flex-start;
   padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   min-width: 0;
 }
@@ -119,7 +130,7 @@
   display: grid;
   gap: 5px;
   padding: 14px 16px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface-card);
   min-width: 0;
@@ -153,9 +164,9 @@
   margin-top: 4px;
 }
 .seo-app .seo-vital__zone { display: block; height: 100%; }
-.seo-app .seo-vital__zone--good { background: color-mix(in srgb, var(--green-500) 38%, transparent); }
-.seo-app .seo-vital__zone--ni   { background: color-mix(in srgb, var(--amber-500) 38%, transparent); }
-.seo-app .seo-vital__zone--poor { background: color-mix(in srgb, var(--red-500) 34%, transparent); }
+.seo-app .seo-vital__zone--good { background: color-mix(in srgb, var(--success) 38%, transparent); }
+.seo-app .seo-vital__zone--ni   { background: color-mix(in srgb, var(--warning) 38%, transparent); }
+.seo-app .seo-vital__zone--poor { background: color-mix(in srgb, var(--danger) 34%, transparent); }
 .seo-app .seo-vital__pin {
   position: absolute;
   top: -3px;
@@ -191,8 +202,9 @@
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
 }
 .seo-app .seo-vitals__pageUrl {
   font: 500 12.5px/1.4 var(--font-mono);
@@ -204,13 +216,20 @@
 
 /* ---- Keyword pool ------------------------------------------------------- */
 /* The band row doubles as the filter. Counts and control in one place beats a
-   summary strip plus a separate dropdown that says the same thing twice. */
+   summary strip plus a separate dropdown that says the same thing twice.
+
+   Hover/active treatment (Task 9): mirrors `.seo-sidebar__item` from Task 6 —
+   hover picks up the same `--surface-hover` fill the sidebar uses, and the
+   active band gets a single brand-coloured accent (its own count, the "one
+   accent per stat" the tile figures already use) rather than a brand border
+   plus a brand-tinted fill on every side, which is the direction's "restrained
+   accent" reading applied to this older component. */
 .seo-app .seo-bands { display: flex; flex-wrap: wrap; gap: 8px; }
 .seo-app .seo-band {
   display: grid;
   gap: 1px;
   padding: 9px 14px;
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface-card);
   cursor: pointer;
@@ -218,8 +237,9 @@
   transition: border-color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out);
 }
-.seo-app .seo-band:hover { border-color: var(--brand-border); }
+.seo-app .seo-band:hover { background: var(--surface-hover); border-color: var(--brand-border); }
 .seo-app .seo-band--on { border-color: var(--brand); background: var(--brand-bg); }
+.seo-app .seo-band--on .seo-band__n { color: var(--brand); }
 .seo-app .seo-band:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .seo-app .seo-band__n {
   font: 650 17px/1.1 var(--font-display);
@@ -238,13 +258,15 @@
   gap: 14px;
   align-items: center;
   padding: 10px 14px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   font: 450 13px/1.45 var(--font-sans);
   min-width: 0;
 }
 .seo-app .seo-pool__row--head {
   border: none;
+  background: none;
   padding-bottom: 2px;
   font: 600 11.5px/1.3 var(--font-sans);
   color: var(--text-tertiary);

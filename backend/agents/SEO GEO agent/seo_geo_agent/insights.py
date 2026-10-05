@@ -565,6 +565,16 @@ def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
         "ga": ga,
     }
     state.save(f"run-{brand['id']}", run)
+
+    # Auto-populate the keyword pool alongside every refresh — free (GSC rows
+    # and topics are already fetched above, no extra network/LLM call), so
+    # there is no reason to make this a separate manual step. Local import:
+    # keyword_pool imports ctr_at from this module, so a top-level import here
+    # would be circular.
+    from . import keyword_pool
+
+    keyword_pool.build(brand, rows, topics=topic_list, notes=list(degraded))
+
     return run
 
 

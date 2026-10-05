@@ -491,3 +491,115 @@ def test_live_topics_cap_at_ten():
     live = [t for t in ranked if not t.get("avoided")]
     assert len(live) <= 10
     assert len(ranked) <= 10  # nothing was avoided here, so the cap applies to the whole list
+
+
+# ------------------------------- HTTP: priorities routes -------------------------------
+#
+# Nothing else in this suite exercises app/routers/seo_geo.py — every test above
+# calls seo_geo_agent functions directly, so there is no existing `client` /
+# `auth_headers` / brand-seeding fixture to reuse for the new
+# GET/POST /api/seo-geo/priorities/{brand_id} routes. These are the first tests
+# to go through the real FastAPI app, dependency injection included, so they
+# bring their own minimal TestClient setup rather than inventing fixtures that
+# would look borrowed from a convention that doesn't exist yet.
+#
+# `app` (backend/app) is not on sys.path when this file is collected from
+# `backend/agents/SEO GEO agent/` alone — only `backend/agents/SEO GEO agent`
+# is (see tests/conftest.py's AGENT_ROOT). Mirror that pattern for the repo's
+# `backend/` root so `from app...` resolves regardless of which directory
+# pytest was invoked from.
+import pathlib as _pathlib
+import sys as _sys
+
+_BACKEND_ROOT = _pathlib.Path(__file__).resolve().parents[4]
+if str(_BACKEND_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_BACKEND_ROOT))
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+from app.main import app as _fastapi_app  # noqa: E402
+from app.security import get_current_user  # noqa: E402
+
+_TEST_USER = {
+    "id": "test-user", "email": "test@example.com",
+    "is_admin": True, "is_creator": True, "is_geo_editor": True,
+    "session_id": "test", "timezone": "UTC",
+}
+
+
+@pytest.fixture()
+def client():
+    _fastapi_app.dependency_overrides[get_current_user] = lambda: _TEST_USER
+    try:
+        with TestClient(_fastapi_app) as c:
+            yield c
+    finally:
+        _fastapi_app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture()
+def auth_headers():
+    return {"Authorization": "Bearer test"}
+
+
+def test_get_priorities_returns_none_when_never_built(client, auth_headers):
+    brand_id = insights.list_brands()[0]["id"]
+    resp = client.get(f"/api/seo-geo/priorities/{brand_id}", headers=auth_headers)
+    assert resp.status_code == 200
+    assert resp.json()["priorities"] is None
+
+
+def test_refresh_priorities_builds_and_persists(client, auth_headers):
+    brand_id = insights.list_brands()[0]["id"]
+    resp = client.post(f"/api/seo-geo/priorities/{brand_id}/refresh", headers=auth_headers)
+    assert resp.status_code == 200
+    assert "items" in resp.json()["priorities"]
+
+    resp2 = client.get(f"/api/seo-geo/priorities/{brand_id}", headers=auth_headers)
+    assert resp2.json()["priorities"]["items"] == resp.json()["priorities"]["items"]
+
+
+def test_get_priorities_404s_for_unknown_brand(client, auth_headers):
+    resp = client.get("/api/seo-geo/priorities/does-not-exist", headers=auth_headers)
+    assert resp.status_code == 404
+
+
+# ------------------------------- HTTP: custom queries + pool visibility -------------------------------
+
+def test_add_and_remove_custom_query(client, auth_headers):
+    brand_id = insights.list_brands()[0]["id"]
+    resp = client.post(
+        f"/api/seo-geo/competitors/{brand_id}/custom-queries",
+        json={"query": "clat coaching jaipur"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert "clat coaching jaipur" in resp.json()["custom_queries"]
+
+    resp2 = client.request(
+        "DELETE",
+        f"/api/seo-geo/competitors/{brand_id}/custom-queries",
+        json={"query": "clat coaching jaipur"},
+        headers=auth_headers,
+    )
+    assert resp2.status_code == 200
+    assert resp2.json()["custom_queries"] == []
+
+
+def test_add_custom_query_rejects_empty(client, auth_headers):
+    brand_id = insights.list_brands()[0]["id"]
+    resp = client.post(
+        f"/api/seo-geo/competitors/{brand_id}/custom-queries",
+        json={"query": "   "},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 400
+
+
+def test_get_competitors_reports_pool_size_and_cap(client, auth_headers):
+    brand_id = insights.list_brands()[0]["id"]
+    resp = client.get(f"/api/seo-geo/competitors/{brand_id}", headers=auth_headers)
+    body = resp.json()
+    assert "pool_size" in body and "pool_cap" in body
+    assert body["pool_cap"] == 50
+    assert "custom_queries" in body

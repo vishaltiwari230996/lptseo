@@ -2167,6 +2167,9 @@ export interface SeoCompetitors {
   suggested: string[];
   shifts: SeoRankShift[];
   feed: Record<string, SeoSitemapEntry>;
+  custom_queries: string[];
+  pool_size: number;
+  pool_cap: number;
 }
 
 export interface SeoBrief {
@@ -2245,6 +2248,21 @@ export const seoTrackCompetitors = (brandId: string) =>
   postJson<{ shifts: SeoRankShift[]; feed: Record<string, SeoSitemapEntry>; degraded: string[] }>(
     `/api/seo-geo/competitors/${brandId}/track`,
     {},
+  );
+
+export const seoAddCustomQuery = (brandId: string, query: string) =>
+  postJson<{ custom_queries: string[]; pool_size: number }>(
+    `/api/seo-geo/competitors/${brandId}/custom-queries`, { query },
+  );
+
+export const seoRemoveCustomQuery = (brandId: string, query: string) =>
+  requestJson<{ custom_queries: string[]; pool_size: number }>(
+    `/api/seo-geo/competitors/${brandId}/custom-queries`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    },
   );
 
 /** Top-5 competitor profiles: visibility, keywords they beat us on, and a
@@ -2558,6 +2576,28 @@ export const seoVitals = (id: string, opts?: RequestOptions) =>
 
 export const seoVitalsRefresh = (id: string) =>
   postJson<{ vitals: SeoVitalsDoc }>(`/api/seo-geo/vitals/${id}/refresh`, {});
+
+export interface SeoPriorityItem {
+  id: string;
+  title: string;
+  why_it_matters: string;
+  severity: "critical" | "warning" | "suggestion";
+  source: "vitals" | "keyword_pool" | "competitors" | "deep_audit" | "insights";
+  action_link: string;
+}
+
+export interface SeoPrioritiesDoc {
+  brand_id: string;
+  at: string;
+  items: SeoPriorityItem[];
+  notes: string[];
+}
+
+export const seoPriorities = (id: string, opts?: RequestOptions) =>
+  getJson<{ priorities: SeoPrioritiesDoc | null }>(`/api/seo-geo/priorities/${id}`, opts);
+
+export const seoPrioritiesRefresh = (id: string) =>
+  postJson<{ priorities: SeoPrioritiesDoc }>(`/api/seo-geo/priorities/${id}/refresh`, {});
 
 export type SeoKeywordBand = "top3" | "page1" | "page2" | "beyond" | "unranked";
 

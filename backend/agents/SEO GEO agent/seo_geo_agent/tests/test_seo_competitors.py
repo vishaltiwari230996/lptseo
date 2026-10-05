@@ -263,3 +263,35 @@ def test_serper_cap_two_calls_per_competitor():
     # the 3rd post's title DID match a lab volume — the cap just meant no SERP
     # check ran for it, which is a different (honest) claim than "no volume data"
     assert posts[2]["estimate_basis"] == "volume matched — SERP check unavailable this run"
+
+
+# ------------------------------- custom queries persistence -------------------------------
+
+def test_add_custom_query_persists_and_dedupes_case_insensitively():
+    competitors.add_custom_query("acme", "CLAT coaching Jodhpur")
+    result = competitors.add_custom_query("acme", "clat coaching jodhpur")  # same, different case
+    assert result == ["CLAT coaching Jodhpur"]  # first-occurrence casing wins, no duplicate
+
+
+def test_add_custom_query_rejects_empty_or_too_long():
+    try:
+        competitors.add_custom_query("acme", "   ")
+        assert False, "expected ValueError for empty query"
+    except ValueError:
+        pass
+    try:
+        competitors.add_custom_query("acme", "x" * 201)
+        assert False, "expected ValueError for too-long query"
+    except ValueError:
+        pass
+
+
+def test_remove_custom_query_removes_case_insensitively():
+    competitors.add_custom_query("acme", "judiciary exam prep")
+    result = competitors.remove_custom_query("acme", "JUDICIARY EXAM PREP")
+    assert result == []
+    assert competitors.list_custom_queries("acme") == []
+
+
+def test_list_custom_queries_empty_when_never_added():
+    assert competitors.list_custom_queries("brand-with-no-queries") == []

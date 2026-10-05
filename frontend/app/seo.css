@@ -114,64 +114,6 @@
 .seo-story p { margin: 0; font: 400 17px/1.55 var(--font-display); color: var(--text-primary); }
 .seo-story strong { font-weight: 650; }
 
-/* This week — the one card that tells you what to do. */
-.seo-hero {
-  display: grid; gap: 12px;
-  border: 1px solid color-mix(in srgb, var(--green-500) 30%, var(--border));
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--green-500) 4%, var(--surface-card));
-  padding: 16px 18px;
-}
-.seo-hero__title {
-  font: 600 11px/1.2 var(--font-mono);
-  letter-spacing: 0.14em; text-transform: uppercase;
-  color: var(--green-500);
-}
-.seo-hero__item { display: flex; gap: 12px; align-items: flex-start; }
-.seo-hero__num {
-  display: grid; place-items: center;
-  min-width: 24px; height: 24px;
-  font: 700 12px/1 var(--font-mono);
-  color: var(--green-500);
-  border: 1px solid color-mix(in srgb, var(--green-500) 45%, transparent);
-  border-radius: 999px;
-  flex-shrink: 0;
-}
-.seo-hero__body { display: grid; gap: 3px; min-width: 0; }
-.seo-hero__action { font: 600 14px/1.4 var(--font-sans); }
-.seo-hero__detail { font: 400 12.5px/1.5 var(--font-sans); color: var(--text-secondary); }
-
-/* Folds — everything else waits quietly until asked. */
-.seo-fold { border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-card); }
-.seo-fold__head {
-  display: flex; align-items: center; gap: 10px;
-  width: 100%;
-  padding: 13px 14px;
-  border: none; background: none;
-  font: 600 13.5px/1.2 var(--font-sans);
-  color: var(--text-primary);
-  cursor: pointer;
-  text-align: left;
-}
-.seo-fold__head:hover { background: var(--surface-hover); border-radius: var(--radius-md); }
-.seo-fold__head svg { color: var(--text-tertiary); flex-shrink: 0; }
-.seo-fold__title { flex-shrink: 0; }
-.seo-fold__count {
-  font: 600 11px/1 var(--font-mono);
-  color: var(--text-secondary);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 8px;
-}
-.seo-fold__hint {
-  font: 400 12.5px/1.3 var(--font-sans);
-  color: var(--text-tertiary);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  margin-left: auto;
-}
-.seo-fold__body { padding: 4px 14px 14px; display: grid; gap: 14px; }
-.seo-fold__body > .mr-section { border: none; padding: 0; background: none; }
-
 button.seo-chip { background: transparent; cursor: pointer; }
 button.seo-chip:hover { background: var(--surface-hover); }
 
@@ -192,47 +134,12 @@ button.seo-chip:hover { background: var(--surface-hover); }
 .seo-insights { margin: 0; padding-left: 18px; display: grid; gap: 6px; font: 500 13px/1.5 var(--font-sans); }
 .seo-empty { font: 500 13px/1.5 var(--font-sans); color: var(--text-tertiary); }
 
-/* Fix list ---------------------------------------------------------------- */
-.seo-todo {
-  display: flex; gap: 14px; align-items: flex-start;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-}
-.seo-todo--done { opacity: 0.55; }
-.seo-todo__gain {
-  display: grid; gap: 2px; justify-items: center;
-  min-width: 74px;
-  font: 700 16px/1 var(--font-mono);
-  color: var(--green-500);
-  font-variant-numeric: tabular-nums;
-}
-.seo-todo__gain small { font: 600 9.5px/1.2 var(--font-sans); color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; }
-.seo-todo__body { display: grid; gap: 4px; flex: 1; min-width: 0; }
-.seo-todo__action { font: 600 13.5px/1.35 var(--font-sans); }
-.seo-todo__why { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-secondary); }
-.seo-todo__meta { display: flex; flex-wrap: wrap; gap: 10px; font: 500 11.5px/1 var(--font-mono); color: var(--text-tertiary); }
-.seo-status {
-  font: 600 12px/1 var(--font-sans);
-  padding: 7px 9px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: var(--surface-card);
-  color: var(--text-primary);
-  cursor: pointer;
-}
-.seo-status--assigned { color: var(--amber-500); }
-.seo-status--done { color: var(--green-500); }
-
-.seo-todo__rank {
-  display: grid; place-items: center;
-  min-width: 22px; height: 22px;
-  font: 700 11px/1 var(--font-mono);
-  color: var(--text-tertiary);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  flex-shrink: 0;
-}
+/* Fix list ------------------------------------------------------------------
+   The retired accordion's row styling (.seo-todo/.seo-status and friends) was
+   removed in Task 9 — Task 8's Shell migration stopped rendering the Fix list
+   this way, and grepping components/console/seo/*.tsx turned up zero
+   remaining references. `.seo-todo__more` survives: dashboard.tsx still uses
+   it (alongside `.seo-btn`) for the Fix list's "show all" toggle. */
 .seo-todo__more { justify-self: center; }
 
 /* Topic lab --------------------------------------------------------------- */
@@ -267,8 +174,7 @@ button.seo-chip:hover { background: var(--surface-hover); }
 .seo-avoided__reason { font: 400 12.5px/1.45 var(--font-sans); color: var(--text-tertiary); }
 
 @media (max-width: 640px) {
-  .seo-todo, .seo-topic { flex-direction: column; }
-  .seo-todo__gain { justify-items: start; }
+  .seo-topic { flex-direction: column; }
 }
 
 /* Researcher layer: keyword lab, competitors, briefs, audit ---------------- */
@@ -340,9 +246,6 @@ button.seo-chip:hover { background: var(--surface-hover); }
 .seo-check__note { color: var(--text-secondary); }
 
 .seo-plan { display: grid; gap: 5px; padding: 10px 12px; border: 1px dashed var(--border); border-radius: var(--radius-md); }
-
-/* Rank-tracking mode (no Search Console): position replaces the gain figure. */
-.seo-todo__gain--pos { color: var(--text-primary); }
 
 /* Tiers, topic impact, and the Ask thread ---------------------------------- */
 .seo-tier { display: grid; gap: 8px; }
@@ -470,6 +373,11 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-comp__post-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .seo-comp__reach { font: 500 11.5px/1 var(--font-mono); color: var(--text-tertiary); }
 
+/* Custom query pool: add/remove + "N of cap" indicator ---------------------- */
+.seo-comp__queries { display: grid; gap: 8px; margin-bottom: 12px; }
+.seo-comp__query-add { display: flex; gap: 8px; }
+.seo-comp__query-list { display: flex; gap: 6px; flex-wrap: wrap; }
+
 /* =========================================================================
    Premium pass — added with the Law Prep Tutorial rebrand.
    Layered at the end of this file rather than edited into the rules above, so
@@ -493,8 +401,7 @@ a.seo-pages__path:hover { color: var(--green-500); }
    decoration that costs legibility at 10.5px, and this file already committed
    to "calm sentence-case titles across the SEO panel" for section headings —
    this is that decision applied to the last place it had not reached. */
-.seo-app .seo-stat__label,
-.seo-app .seo-hero__title {
+.seo-app .seo-stat__label {
   font: 600 12px/1.3 var(--font-sans);
   letter-spacing: 0;
   text-transform: none;
@@ -553,9 +460,6 @@ a.seo-pages__path:hover { color: var(--green-500); }
 }
 .seo-app .seo-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-.seo-app .seo-fold { border-color: var(--border-subtle); border-radius: var(--radius-lg); }
-.seo-app .seo-fold__head { border-radius: var(--radius-lg); }
-
 /* An empty state is an invitation, so it is given room and a readable measure
    rather than being left as one grey line of 13px text. */
 .seo-app .seo-empty {
@@ -587,33 +491,6 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-app .mr-panel { display: grid; gap: 15px; align-content: start; }
 .seo-app .mr-panel__head { margin-bottom: 0; }
 
-/* The week's actions — the most-read text in the console, and it was set at
-   12.5px across the full width. Bigger, looser, and stopped well short of the
-   right edge. */
-.seo-app .seo-hero { padding: 20px 22px; gap: 14px; }
-.seo-app .seo-hero__item { gap: 14px; }
-.seo-app .seo-hero__body { gap: 6px; }
-/* Measures are set in rem, not ch, and the difference is not pedantry: `ch` is
-   the advance of "0", which in Geist is about 30% wider than the average
-   character. A `84ch` cap measured out at 109 real characters — comfortably
-   into the range where the eye loses the start of the next line. These numbers
-   come from measuring the rendered text (scratchpad/measure.mjs), not from a
-   ratio.
-
-   Size went up at the same time. Two-thirds of the strain here was 13.5px body
-   text carrying paragraph-length content; a larger face fixes what a narrower
-   column alone cannot. */
-.seo-app .seo-hero__action {
-  font: 620 16.5px/1.5 var(--font-sans);
-  letter-spacing: -0.013em;
-  max-width: 36rem;   /* ~65 characters */
-}
-.seo-app .seo-hero__detail {
-  font: 450 15px/1.72 var(--font-sans);
-  color: var(--text-secondary);
-  max-width: 37rem;   /* ~77 characters */
-}
-
 /* Degraded sources are a caveat, not an alarm, and there are usually four of
    them at once — as a full-width block of amber they dominated a page whose
    actual subject is the findings above. Quieter ground, one line each with air
@@ -629,11 +506,6 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-app .seo-degraded > div > div + div { margin-top: 9px; }
 .seo-app .seo-degraded > div { max-width: 33rem; }   /* ~76 characters */
 
-/* Folds are rows, so they keep the full width — they just needed room to
-   breathe and a target big enough to hit without aiming. */
-.seo-app .seo-fold__head { padding: 15px 18px; gap: 12px; }
-.seo-app .seo-fold__body { padding: 6px 18px 18px; }
-
 /* The opening sentence is the page talking; give it the measure of a sentence. */
 .seo-app .seo-story { max-width: 34rem; }   /* ~64 characters at 17.5px */
 
@@ -643,55 +515,16 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-app .seo-insights { max-width: 38rem; line-height: 1.7; font-size: 13.5px; }
 .seo-app .seo-poa__action { max-width: 38rem; }
 
-/* Wide screens: the week's actions and the source caveats share a row.
- *
- * Capping the measure fixed the reading but left both blocks as full-width
- * cards with 600px of empty right-hand side, which reads as a mistake rather
- * than as breathing room. Side by side, the width is actually used and the
- * lines stay short — and it puts the caveats beside the work rather than
- * between the work and the detail below it.
- *
- * Scoped by adjacency on purpose. `:has(+ .seo-degraded)` means the actions
- * card only narrows when there is something to sit next to it, and the caveats
- * only narrow when they follow it — a run with no plan, or no degraded
- * sources, still gets a full-width block instead of a stranded quarter-width
- * one. A browser without `:has()` simply keeps the stack, which is the
- * layout this replaces. */
+/* Wide screens: a `.mr-panel` becomes a 12-column grid so any section that
+ * wants to narrow itself (via `grid-column: span N`) has room to sit beside a
+ * sibling instead of stacking full-width. Nothing currently opts into a span
+ * — the hero/degraded pairing that motivated this used to (removed in Task 9
+ * along with the rest of `.seo-hero`, which no longer renders) — but the
+ * default full-span rule below keeps every other `.mr-panel` child unaffected
+ * either way. */
 @media (min-width: 1280px) {
   .seo-app .mr-panel { grid-template-columns: repeat(12, minmax(0, 1fr)); }
   .seo-app .mr-panel > * { grid-column: 1 / -1; }
-  .seo-app .seo-hero:has(+ .seo-degraded) { grid-column: span 7; }
-  .seo-app .seo-hero + .seo-degraded { grid-column: span 5; align-content: start; }
-}
-
-/* ---- Fix list ----------------------------------------------------------- */
-/* This is where the console's longest text lives — a model-written action and
-   its evidence, one per row, ten rows — and it had none of the treatment the
-   blocks above it got. Same rules: a measure, a readable size, and text that
-   can always wrap.
-   `overflow-wrap: anywhere` on the last two is not decoration. A single
-   unbroken token (a long path, a percent-encoded string) has nowhere to break,
-   so it widens its row, which widens the panel, which scrolls the whole page
-   sideways. Nothing in a console should ever do that. */
-.seo-app .seo-todo { padding: 16px 18px; gap: 16px; }
-.seo-app .seo-todo__body { gap: 7px; min-width: 0; }
-.seo-app .seo-todo__action {
-  font: 620 15.5px/1.5 var(--font-sans);
-  letter-spacing: -0.012em;
-  max-width: 33rem;              /* ~64 characters, measured */
-  overflow-wrap: anywhere;
-}
-.seo-app .seo-todo__why {
-  font: 450 14.5px/1.72 var(--font-sans);
-  color: var(--text-secondary);
-  max-width: 34rem;              /* ~73 characters, measured */
-  overflow-wrap: anywhere;
-}
-.seo-app .seo-todo__meta {
-  gap: 6px 14px;
-  font: 500 12px/1.5 var(--font-mono);
-  max-width: 34rem;
-  overflow-wrap: anywhere;
 }
 
 /* Belt and braces: the panel is a grid, and a grid item's default `min-width:
@@ -700,3 +533,186 @@ a.seo-pages__path:hover { color: var(--green-500); }
    whole document. */
 .seo-app .mr-panel > * { min-width: 0; }
 .seo-app .mr-section { min-width: 0; }
+
+/* Shell / Sidebar navigation container (Task 6). Task 8 wired this in to
+   replace the old nine-accordion `.seo-fold` layout; that component and its
+   CSS (along with the retired `.seo-hero` and most of `.seo-todo`) were
+   removed from this file in Task 9 once nothing referenced them any more.
+
+   Token substitutions vs. the original plan (verified against
+   tokens/*.css — the plan's names did not exist as written):
+     --surface-1    -> --surface-card  (elevated card/panel background)
+     --surface-2    -> --surface-hover (hover-state background)
+     --text-caption -> composed from --fs-caption/--lh-caption/--fw-regular,
+                        since no --text-caption shorthand exists (only
+                        --text-body/-heading/-title/-label/-code do)
+   The active item's text-on-brand color uses --on-brand, the token this
+   codebase defines specifically for that purpose, rather than reusing a
+   surface token as the plan's --surface-1 guess did. Corner radii use the
+   existing --radius-xl/--radius-lg scale instead of new hardcoded px values —
+   the same scale Task 9 standardized the dashboard's tile/vital/band/pool
+   cards on (in frontend/app/dashboard.css). */
+.seo-shell {
+  display: grid;
+  grid-template-columns: var(--sidebar-w) 1fr;
+  gap: var(--space-6);
+  align-items: start;
+  min-height: 0;
+}
+
+.seo-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  position: sticky;
+  top: var(--topbar-h);
+  padding: var(--pad-card);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+}
+
+.seo-sidebar__item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--pad-control);
+  border-radius: var(--radius-lg);
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  cursor: pointer;
+  font: var(--text-body);
+}
+
+.seo-sidebar__item:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.seo-sidebar__item--active {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+.seo-sidebar__hint {
+  font: var(--fw-regular) var(--fs-caption)/var(--lh-caption) var(--font-sans);
+  color: inherit;
+  opacity: 0.75;
+}
+
+.seo-shell__content {
+  min-width: 0;
+}
+
+/* Wraps each sidebar section's content (replaces the deleted accordion's
+   `.seo-fold__body { padding: 6px 18px 18px; display: grid; gap: 14px; }`).
+   Sections with more than one child (Traffic, Keywords, Tools) need the same
+   vertical rhythm the old fold body gave them, or their `.mr-section` cards
+   sit flush against each other. --space-4 (16px) is the closest token to the
+   old 14px gap — there is no --space-3.5. */
+.seo-section {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (max-width: 900px) {
+  .seo-shell {
+    grid-template-columns: 1fr;
+  }
+  .seo-sidebar {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+}
+
+/* Insights — the cross-source "what to do next" list (Task 7). Not yet wired
+   into SeoAgent.tsx; Task 8 will render this as the sidebar's default
+   section.
+
+   Root container is named `.seo-insights-panel`, not the shorter
+   `.seo-insights` the plan used — line 192 above already defines a bare
+   `.seo-insights` (and `.seo-app .seo-insights` at line 643-ish) for an
+   unrelated pre-existing bullet list in SeoAgent.tsx. Once this view is
+   wired into that same `.seo-app` tree (Task 8), a root div named
+   `.seo-insights` would silently inherit that list's `padding-left: 18px`,
+   `display: grid`, `gap: 6px` and `max-width: 38rem` — so every selector in
+   this block is scoped under `.seo-insights-panel` instead, and none of them
+   is the bare `.seo-insights` class.
+
+   Token substitutions vs. the original plan (verified against tokens/*.css,
+   same discovery Task 6 made — the plan's names did not exist as written):
+     --surface-1 -> --surface-card  (elevated card/panel background, matches
+                                      .seo-sidebar's own use of the same token)
+   --danger, --warning, --border, --space-3/-4, --pad-card and --brand all
+   exist as named in tokens/colors.css and tokens/spacing.css, so those carry
+   over unchanged. Corner radius uses --radius-lg (matching the card-like
+   containers elsewhere in this file) instead of the plan's hardcoded 10px.
+   Severity chip modifiers follow this file's existing `.seo-chip--<name>`
+   convention (e.g. `.seo-chip--sev-high` above) rather than inventing a new
+   pattern, using the priority item's own severity values
+   (critical/warning/suggestion) as the modifier name. */
+.seo-insights-panel__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--space-4);
+}
+
+.seo-insights-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.seo-insights-panel__item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--pad-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+}
+
+.seo-insights-panel__item--critical {
+  border-left: 3px solid var(--danger);
+}
+
+.seo-insights-panel__item--warning {
+  border-left: 3px solid var(--warning);
+}
+
+.seo-insights-panel__item--suggestion {
+  border-left: 3px solid var(--border);
+}
+
+.seo-chip--critical { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.seo-chip--warning { color: var(--warning); border-color: color-mix(in srgb, var(--warning) 45%, transparent); }
+.seo-chip--suggestion { color: var(--text-tertiary); }
+
+/* A <button>, not a link: it switches the sidebar section rather than
+   navigating, so the browser's button chrome has to be reset back to the
+   link look the rest of the row was designed against. */
+.seo-insights-panel__link {
+  white-space: nowrap;
+  color: var(--brand);
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.seo-insights-panel__link:hover {
+  text-decoration: underline;
+}
+
+.seo-insights-panel__notes {
+  margin-top: var(--space-4);
+  padding-left: var(--space-5);
+}

@@ -123,6 +123,21 @@ def _assessment(metrics: dict) -> str:
     return "failing" if any(c == "poor" for c in cats) else "needs-improvement"
 
 
+def _origin_candidates(domain: str) -> list[str]:
+    """Bare domain first, then the other www/bare form — CrUX needs an exact
+    origin match and this app does not know which form the site's real
+    traffic is recorded under."""
+    bare = domain[4:] if domain.startswith("www.") else domain
+    www = f"www.{bare}"
+    ordered = [bare, www] if domain == bare else [domain, bare]
+    seen: list[str] = []
+    for d in ordered:
+        candidate = f"https://{d}"
+        if candidate not in seen:
+            seen.append(candidate)
+    return seen
+
+
 def build(brand: dict, pages: list[str] | None = None) -> dict:
     """Origin-level vitals on both form factors, plus up to five key pages."""
     key = _api_key()
@@ -134,31 +149,64 @@ def build(brand: dict, pages: list[str] | None = None) -> dict:
             "console.cloud.google.com (enable 'Chrome UX Report API'), then add it to .env"
         )
 
-    origin = f"https://{brand['domain']}"
+    origins = _origin_candidates(brand["domain"])
     notes: list[str] = []
     out_origin: dict[str, dict] = {}
+    origin_tried: list[str] = []
+    origin_used_by_tag: dict[str, str | None] = {}
 
     with httpx.Client() as client:
         for form_factor, tag in (("PHONE", "mobile"), ("DESKTOP", "desktop")):
-            try:
-                record = _query({"origin": origin}, form_factor, key, client)
-            except CredentialMissing:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                notes.append(f"{tag}: CrUX request failed ({type(exc).__name__})")
-                continue
-            if record is None:
+            last_exc: Exception | None = None
+            form_factor_used: str | None = None
+            record = None
+            had_no_data: bool = False
+            for candidate in origins:
+                if candidate not in origin_tried:
+                    origin_tried.append(candidate)
+                try:
+                    record = _query({"origin": candidate}, form_factor, key, client)
+                except CredentialMissing:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    last_exc = exc
+                    continue
+                if record:
+                    form_factor_used = candidate
+                    break
+                else:
+                    # This candidate returned None (legitimate no-data), keep trying
+                    had_no_data = True
+
+            origin_used_by_tag[tag] = form_factor_used
+
+            # Determine note based on outcomes:
+            # - All candidates: no data → "no field data"
+            # - All candidates: errors → "request failed"
+            # - Mixed (some no-data, some errors) → "request failed" with note about mixed outcome
+            if form_factor_used is None and last_exc is None:
                 notes.append(
                     f"{tag}: Chrome has no field data for this origin yet — it needs "
                     "enough traffic to report anonymously."
                 )
                 continue
-            metrics = _read(record)
-            out_origin[tag] = {
-                "metrics": metrics,
-                "assessment": _assessment(metrics),
-                "period": (record.get("collectionPeriod") or {}).get("lastDate"),
-            }
+            elif form_factor_used is None and last_exc is not None:
+                if had_no_data:
+                    notes.append(
+                        f"{tag}: No field data for the tested origins, and the final query failed "
+                        f"({type(last_exc).__name__}: {last_exc})"
+                    )
+                else:
+                    notes.append(f"{tag}: CrUX request failed ({type(last_exc).__name__}: {last_exc})")
+                continue
+
+            if record is not None:
+                metrics = _read(record)
+                out_origin[tag] = {
+                    "metrics": metrics,
+                    "assessment": _assessment(metrics),
+                    "period": (record.get("collectionPeriod") or {}).get("lastDate"),
+                }
 
         page_rows: list[dict] = []
         for url in (pages or [])[:5]:
@@ -179,12 +227,25 @@ def build(brand: dict, pages: list[str] | None = None) -> dict:
                 "assessment": _assessment(metrics),
             })
 
+    # Decide final origin_used: prefer mobile if it succeeded (mobile is our primary signal),
+    # fall back to desktop, then None if neither succeeded. This avoids the ambiguity of
+    # "whichever form factor ran last."
+    final_origin_used: str | None = (
+        origin_used_by_tag.get("mobile")
+        or origin_used_by_tag.get("desktop")
+        or None
+    )
+    # Use final origin for the top-level "origin" field, or first candidate if nothing worked
+    used_origin = final_origin_used or (origins[0] if origins else None)
     doc = {
         "at": date.today().isoformat(),
-        "origin": origin,
+        "origin": used_origin,
         "origin_vitals": out_origin,
         "pages": page_rows,
         "notes": notes,
+        "origin_tried": origin_tried,
+        "origin_used": final_origin_used,
+        "origin_used_by_tag": origin_used_by_tag,
     }
     state.save(_DOC.format(brand["id"]), doc)
     return doc

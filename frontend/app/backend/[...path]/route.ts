@@ -32,9 +32,11 @@ import { GoogleAuth } from "google-auth-library";
 let auth: GoogleAuth | null = null;
 
 async function identityToken(): Promise<string> {
+  // GCP_SA_KEY is only needed off Cloud Run (e.g. a local reproduction of the
+  // relay). On Cloud Run the service's own attached identity is used instead
+  // via Application Default Credentials — no key material to leak or rotate.
   const raw = process.env.GCP_SA_KEY;
-  if (!raw) throw new Error("GCP_SA_KEY is not configured on this deployment");
-  auth ||= new GoogleAuth({ credentials: JSON.parse(raw) });
+  auth ||= new GoogleAuth(raw ? { credentials: JSON.parse(raw) } : undefined);
   const client = await auth.getIdTokenClient(UPSTREAM);
   return client.idTokenProvider.fetchIdToken(UPSTREAM);
 }

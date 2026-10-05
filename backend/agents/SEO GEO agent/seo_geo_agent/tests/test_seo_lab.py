@@ -149,6 +149,80 @@ def test_rank_snapshot_and_shifts():
     assert "x.com" not in doc["suggested_competitors"]
 
 
+def test_rank_tracking_pool_prioritizes_custom_then_auto_then_pool_terms(monkeypatch):
+    brand = {**BRAND, "id": "pool-brand", "seeds": ["seed one"]}
+    competitors.add_custom_query("pool-brand", "custom query one")
+    # tracked_keywords() will pull "seed one" as the sole auto-derived term
+    # (no keyword-lab clusters seeded for this brand id, so heads == [])
+    pool = competitors.rank_tracking_pool(brand)
+    assert pool[0].lower() == "custom query one"  # custom first
+    assert "seed one" in pool
+
+
+def test_rank_tracking_pool_deduplicates_and_caps_at_fifty(monkeypatch):
+    brand = {**BRAND, "id": "cap-brand", "seeds": []}
+    # Seeded directly via state rather than add_custom_query(): this test is about
+    # rank_tracking_pool()'s own dedup+truncate behavior (MAX_RANK_POOL), which is
+    # independent of add_custom_query()'s per-brand storage cap (MAX_CUSTOM_QUERIES) —
+    # going through add_custom_query for 60 unique queries would trip that cap instead.
+    competitors.state.save("custom-queries-cap-brand", {"queries": [f"query {i}" for i in range(60)]})
+    pool = competitors.rank_tracking_pool(brand)
+    assert len(pool) == competitors.MAX_RANK_POOL
+    assert pool[0] == "query 0"  # first-added custom queries survive the cap
+
+
+def test_add_custom_query_caps_total_stored_queries():
+    brand_id = "query-cap-brand"
+    for i in range(competitors.MAX_CUSTOM_QUERIES):
+        competitors.add_custom_query(brand_id, f"query {i}")
+    with pytest.raises(ValueError, match="at most 50 custom queries"):
+        competitors.add_custom_query(brand_id, "one too many")
+    # Re-adding (or no-op adding) an existing query is never blocked by the cap.
+    existing = competitors.add_custom_query(brand_id, "query 0")
+    assert len(existing) == competitors.MAX_CUSTOM_QUERIES
+
+
+def test_rank_snapshot_uses_brand_rank_search_not_serper_search(monkeypatch):
+    calls = {"brand_rank": 0, "serper": 0}
+
+    def fake_brand_rank(q, client=None):
+        calls["brand_rank"] += 1
+        return serp_with(1)
+
+    def fake_serper(q, client=None):
+        calls["serper"] += 1
+        return serp_with(1)
+
+    monkeypatch.setattr(competitors.sources, "brand_rank_available", lambda: True)
+    monkeypatch.setattr(competitors.sources, "brand_rank_search", fake_brand_rank)
+    monkeypatch.setattr(competitors.sources, "serper_search", fake_serper)
+
+    competitors.rank_snapshot({**BRAND, "id": "provider-check"})
+
+    assert calls["brand_rank"] > 0
+    assert calls["serper"] == 0
+
+
+def test_custom_query_reaches_snapshot_end_to_end(monkeypatch):
+    """rank_tracking_pool() including a custom query is not enough on its own —
+    prove the query actually reaches the SERP call and lands in the persisted
+    snapshot, the real end-to-end path a user's added query travels."""
+    seen = []
+
+    def fake_brand_rank(q, client=None):
+        seen.append(q)
+        return serp_with(1)
+
+    monkeypatch.setattr(competitors.sources, "brand_rank_available", lambda: True)
+    monkeypatch.setattr(competitors.sources, "brand_rank_search", fake_brand_rank)
+
+    competitors.add_custom_query("e2e-check", "my custom query")
+    doc = competitors.rank_snapshot({**BRAND, "id": "e2e-check"})
+
+    assert "my custom query" in seen
+    assert "my custom query" in doc["snapshots"][-1]["ranks"]
+
+
 def test_sitemap_watch_flags_new_content():
     first = competitors.sitemap_watch(BRAND, fetch_sitemap=lambda d: ["https://comp.com/a", "https://comp.com/b"])
     assert first["comp.com"]["first_check"] is True and first["comp.com"]["new_count"] == 0
