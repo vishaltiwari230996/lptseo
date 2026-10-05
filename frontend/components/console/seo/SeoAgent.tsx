@@ -17,6 +17,7 @@ import { AskView, AuditView, BriefsView, CompetitorsView, KeywordsView } from ".
 import { DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
 import { DeepAuditPanel } from "./deep";
 import { InsightsView } from "./insights";
+import { RankTrackerView } from "./ranktracker";
 import { Shell, type SidebarSection } from "./shell";
 
 /* "Keyword lab" used to live here too; it now sits in the Keywords section,
@@ -38,6 +39,7 @@ const SECTIONS: SidebarSection[] = [
   { id: "health", label: "Website health" },
   { id: "keywords", label: "Keywords" },
   { id: "competitors", label: "Competitors" },
+  { id: "rank-tracker", label: "Rank tracker" },
   { id: "vitals", label: "Core Web Vitals" },
   { id: "deep-audit", label: "Deep audit" },
   { id: "pages", label: "Pages" },
@@ -51,7 +53,7 @@ const SECTIONS: SidebarSection[] = [
  *  future id rename — is treated as unrecognized and falls back to Insights,
  *  both at the type level (`activeSection`'s state) and at runtime (see
  *  `navigateToSection` below). */
-type SectionId = "insights" | "traffic" | "health" | "keywords" | "competitors" | "vitals" | "deep-audit" | "pages" | "tools";
+type SectionId = "insights" | "traffic" | "health" | "keywords" | "competitors" | "rank-tracker" | "vitals" | "deep-audit" | "pages" | "tools";
 
 function isSectionId(id: string): id is SectionId {
   return SECTIONS.some((s) => s.id === id);
@@ -1016,6 +1018,12 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
               {activeSection === "competitors" && (
                 <div className="seo-section">
                   <CompetitorsView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
+                </div>
+              )}
+
+              {activeSection === "rank-tracker" && (
+                <div className="seo-section">
+                  <RankTrackerView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
                 </div>
               )}
 

@@ -35,4 +35,19 @@ describe("Shell", () => {
     render(<Shell sections={SECTIONS} activeId="insights" onSelect={vi.fn()}>hello-content</Shell>);
     expect(screen.getByText("hello-content")).toBeInTheDocument();
   });
+
+  it("offers a Rank tracker section", () => {
+    render(
+      <Shell
+        sections={[{ id: "insights", label: "Insights" },
+                   { id: "rank-tracker", label: "Rank tracker" }]}
+        activeId="rank-tracker"
+        onSelect={vi.fn()}
+      >
+        <div>panel</div>
+      </Shell>,
+    );
+    expect(screen.getByRole("button", { name: /rank tracker/i }))
+      .toHaveAttribute("aria-current", "page");
+  });
 });
