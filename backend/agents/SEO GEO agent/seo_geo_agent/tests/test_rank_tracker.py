@@ -407,3 +407,175 @@ def test_rollup_rival_reroll_with_equal_at_replaces_last():
     rival_triple = row["rivals"]["rival.com"]["daily"][0][1]
     assert rival_triple["last"] == 3  # replaced with new observation
     assert rival_triple["at"] == original_at
+
+
+def _serp(*entries):
+    """entries: (position, url)."""
+    return {"organic": [{"position": p, "link": u, "title": f"t{p}"} for p, u in entries],
+            "related": [], "paa": [], "aio_present": False}
+
+
+def test_sweep_records_our_position_and_the_full_top_list(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, **kw):
+        return _serp((1, "https://rival.com/a"), (2, "https://lawpreptutorial.com/clat"))
+
+    out = rt.sweep(_brand(), search=search)
+
+    assert out["checked"] == 1 and out["ranked"] == 1 and out["errors"] == 0
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] == 2
+    assert row["url"] == "https://lawpreptutorial.com/clat"
+    assert [e["domain"] for e in row["top"]] == ["rival.com", "lawpreptutorial.com"]
+
+
+def test_sweep_does_not_match_a_lookalike_domain(monkeypatch):
+    """`domain in link` matches fake-lawpreptutorial.com.spam.io — a phantom rank."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, **kw):
+        return _serp((1, "https://fake-lawpreptutorial.com.spam.io/x"),
+                     (2, "https://www.lawpreptutorial.com/clat"))
+
+    rt.sweep(_brand(), search=search)
+
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] == 2           # the www. form of our real domain
+    assert row["url"].endswith("/clat")
+
+
+def test_sweep_continues_past_a_query_that_raises(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["good", "bad", "also good"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, **kw):
+        if query == "bad":
+            raise RuntimeError("serper 429")
+        return _serp((3, "https://lawpreptutorial.com/x"))
+
+    out = rt.sweep(_brand(), search=search)
+
+    assert out["checked"] == 3 and out["ranked"] == 2 and out["errors"] == 1
+    bad = next(r for r in rt.latest_rows("b1") if r["query"] == "bad")
+    assert "429" in bad["error"] and bad["position"] is None
+
+
+def test_sweep_treats_an_empty_serp_as_an_error_not_an_unranked_result(monkeypatch):
+    """A rate-limited provider returns nothing for everything; that is missing
+    data, and must not be written into history as a site-wide collapse."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    out = rt.sweep(_brand(), search=lambda query, **kw: _serp())
+
+    assert out["errors"] == 1
+    assert rt.latest_rows("b1")[0]["error"] == "empty SERP"
+    assert rt.history_for("b1", "q") is None
+
+
+def test_sweep_refuses_when_the_daily_budget_is_exhausted(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+    rt.charge("b1", rt.MAX_SEARCHES_PER_DAY)
+
+    calls = []
+    out = rt.sweep(_brand(), search=lambda q, **kw: calls.append(q) or _serp())
+
+    assert out["blocked"] == "budget"
+    assert calls == []
+
+
+def test_sweep_refuses_when_rank_tracking_is_disabled_for_the_brand(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    calls = []
+    out = rt.sweep(_brand(rank_tracking_enabled=False),
+                   search=lambda q, **kw: calls.append(q) or _serp())
+
+    assert out["blocked"] == "disabled" and calls == []
+
+
+def test_sweep_charges_one_credit_per_query(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["a", "b", "c"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")))
+
+    assert rt.budget_status("b1")["searches"] == 3
+
+
+def test_sweep_harvests_related_and_paa_for_the_next_rebuild(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, **kw):
+        serp = _serp((1, "https://x.com/"))
+        serp["related"] = ["clat syllabus"]
+        serp["paa"] = ["how hard is clat"]
+        return serp
+
+    rt.sweep(_brand(), search=search)
+
+    assert set(rt._harvest_ranked("b1")) == {"clat syllabus", "how hard is clat"}
+
+
+def test_sweep_skips_inactive_queries(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["old"])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["new"])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    seen = []
+    rt.sweep(_brand(), search=lambda q, **kw: seen.append(q) or _serp((1, "https://x.com/")))
+
+    assert seen == ["new"]
+
+
+def test_sweep_uses_brand_serp_country_override_for_the_real_provider(monkeypatch):
+    """Global Constraints: SERP country is overridable per brand via
+    ``serp_country``. The sweep is the only caller holding the brand doc, so
+    it must plumb that override into the real provider call — but an
+    injected ``search`` (every other test here) must still be called as
+    ``search(query)`` with no extra kwargs."""
+    from seo_geo_agent import competitors, sources
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    monkeypatch.setattr(sources, "brand_rank_available", lambda: True)
+    seen_gl = []
+
+    def fake_provider(query, client=None, *, gl="in", hl="en", num=20):
+        seen_gl.append(gl)
+        return _serp((1, "https://x.com/"))
+
+    monkeypatch.setattr(sources, "brand_rank_search", fake_provider)
+
+    rt.sweep(_brand(serp_country="ae"))
+    assert seen_gl == ["ae"]
+
+    seen_gl.clear()
+    rt.sweep(_brand())
+    assert seen_gl == ["in"]

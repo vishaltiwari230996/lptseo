@@ -339,3 +339,110 @@ def rollup(brand_id: str, today: date | None = None) -> int:
 
     jobs.save_list(HISTORY_PREFIX.format(brand_id), rows)
     return len(rows)
+
+
+def _ours(link: str, domain: str) -> bool:
+    """Host-equality, not substring containment.
+
+    ``domain in link`` — what the old rank_snapshot did — says yes to
+    ``https://fake-lawpreptutorial.com.spam.io/x``, recording a competitor's
+    spam page as our own rank.
+    """
+    host = sources.domain_of(link)
+    return host == domain.lower() or host.endswith("." + domain.lower())
+
+
+def latest_rows(brand_id: str) -> list[dict]:
+    rows, _ = jobs.load_list(LATEST_PREFIX.format(brand_id))
+    return rows
+
+
+def latest_meta(brand_id: str) -> dict | None:
+    _, meta = jobs.load_list(LATEST_PREFIX.format(brand_id))
+    return meta
+
+
+def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
+    """One pass over every active query. Never raises for a single bad SERP."""
+    brand_id = brand["id"]
+    moment = now or _now()
+    notes: list[str] = []
+
+    if not enabled(brand):
+        return {"checked": 0, "ranked": 0, "errors": 0, "blocked": "disabled",
+                "at": moment.isoformat(timespec="seconds"),
+                "notes": ["Rank tracking is switched off for this brand"]}
+
+    if search is None:
+        if not sources.brand_rank_available():
+            return {"checked": 0, "ranked": 0, "errors": 0, "blocked": "credentials",
+                    "at": moment.isoformat(timespec="seconds"),
+                    "notes": ["SEO_SERPER_API_KEY not set — rank tracking needs live SERPs"]}
+        # Global Constraints: SERP country is overridable per brand. This is
+        # the only caller that holds the brand doc, so the override is
+        # plumbed in here, via a closure, rather than changing what a caller
+        # passes — an injected ``search`` (every test above) stays a plain
+        # ``search(query)`` call with no extra kwargs.
+        gl = (brand.get("serp_country") or sources.SERP_COUNTRY).strip().lower()
+
+        def search(query: str) -> dict:
+            return sources.brand_rank_search(query, gl=gl)
+
+    queries = active_queries(brand_id)
+    if progress:
+        progress.phase(f"checking {len(queries)} queries", total=len(queries))
+
+    rivals = [d.lower() for d in (brand.get("competitors") or [])][:8]
+    results: list[dict] = []
+    harvested: list[str] = []
+    ranked = errors = 0
+    blocked = None
+
+    for query in queries:
+        if not charge(brand_id, 1, today=moment.date()):
+            notes.append(f"Daily search budget reached — stopped after {len(results)} queries")
+            blocked = "budget"
+            if progress:
+                progress.note("daily budget reached, stopping")
+            break
+        row = {"query": query, "position": None, "url": "",
+               "checked_at": moment.isoformat(timespec="seconds"), "top": [], "error": None}
+        try:
+            serp = search(query)
+            organic = serp.get("organic") or []
+            if not organic:
+                raise ValueError("empty SERP")
+            row["top"] = [{"position": entry.get("position", n + 1),
+                           "domain": sources.domain_of(entry.get("link", "")),
+                           "url": entry.get("link", ""),
+                           "title": entry.get("title", "")}
+                          for n, entry in enumerate(organic)]
+            ours = next((e for e in organic if _ours(e.get("link", ""), brand["domain"])), None)
+            if ours:
+                row["position"] = ours.get("position")
+                row["url"] = ours.get("link", "")
+            harvested.extend(serp.get("related") or [])
+            harvested.extend(serp.get("paa") or [])
+            ranked += 1
+        except Exception as exc:  # noqa: BLE001 — one bad SERP must not lose the other 199
+            row["error"] = f"{exc}"[:200]
+            errors += 1
+        results.append(row)
+        if progress:
+            progress.step()
+
+    jobs.save_list(LATEST_PREFIX.format(brand_id), results,
+                   meta={"at": moment.isoformat(timespec="seconds"),
+                         "ranked": ranked, "errors": errors, "rivals": rivals})
+    record_harvest(brand_id, harvested)
+    append_history(brand_id, results, rivals, now=moment)
+
+    last_rollup = (state.load(POOL_DOC.format(brand_id)) or {}).get("rolled_up_on")
+    if last_rollup != moment.date().isoformat():
+        rollup(brand_id, today=moment.date())
+        pool = latest_pool(brand_id) or {}
+        pool["rolled_up_on"] = moment.date().isoformat()
+        state.save(POOL_DOC.format(brand_id), pool)
+
+    return {"checked": len(results), "ranked": ranked, "errors": errors, "blocked": blocked,
+            "at": moment.isoformat(timespec="seconds"), "notes": notes}
