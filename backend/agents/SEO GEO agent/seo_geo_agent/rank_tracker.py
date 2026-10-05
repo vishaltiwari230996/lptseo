@@ -92,3 +92,118 @@ def charge(brand_id: str, n: int = 1, today: date | None = None) -> bool:
         return {"date": day, "searches": spent + n}, True
 
     return state.mutate(BUDGET_DOC.format(brand_id), change)
+
+
+def record_harvest(brand_id: str, queries: list[str]) -> None:
+    """Count related/PAA questions a sweep saw. These arrive free inside every
+    SERP response, which is what lets the pool keep growing with real Google
+    queries when Search Console is unavailable."""
+    if not queries:
+        return
+
+    def change(current: dict) -> tuple[dict, None]:
+        counts = dict(current.get("counts") or {})
+        for raw in queries:
+            key = _norm(raw)
+            if key and len(key) <= MAX_QUERY_LEN:
+                counts[key] = counts.get(key, 0) + 1
+        trimmed = dict(sorted(counts.items(), key=lambda kv: -kv[1])[:HARVEST_KEEP])
+        return {"counts": trimmed}, None
+
+    state.mutate(HARVEST_DOC.format(brand_id), change)
+
+
+def _harvest_ranked(brand_id: str) -> list[str]:
+    counts = (state.load(HARVEST_DOC.format(brand_id)) or {}).get("counts") or {}
+    return [q for q, _ in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+def build_pool(brand: dict, rows_fn=None) -> dict:
+    """Merge every query source into one capped, deduplicated, provenanced pool.
+
+    Priority order is the whole design: what the owner asked for explicitly,
+    then what Search Console proves people search, then what Google itself
+    volunteered in related/PAA blocks, then our own strategy seeds. Earlier
+    sources win the dedup and survive the cap.
+
+    ``rows_fn(brand) -> (rows, notes)`` matches the deep audit's convention —
+    the router owns the GSC property and date window, so this stays testable
+    without a Google client.
+    """
+    from . import competitors
+
+    notes: list[str] = []
+    sources_used: list[str] = []
+    candidates: list[tuple[str, str, int]] = []  # (query, source, impressions)
+
+    for q in competitors.list_custom_queries(brand["id"]):
+        candidates.append((q, "custom", 0))
+    if candidates:
+        sources_used.append("custom")
+
+    rows, gsc_notes = rows_fn(brand) if rows_fn else ([], [])
+    notes.extend(gsc_notes)
+    if rows:
+        totals: dict[str, tuple[str, int]] = {}
+        for row in rows:
+            key = _norm(row.query)
+            label, seen = totals.get(key, (row.query, 0))
+            totals[key] = (label, seen + int(row.impressions or 0))
+        ranked = sorted(totals.values(), key=lambda pair: (-pair[1], pair[0]))
+        for label, impressions in ranked:
+            if impressions >= MIN_GSC_IMPRESSIONS:
+                candidates.append((label, "gsc", impressions))
+        sources_used.append("gsc")
+
+    harvested = _harvest_ranked(brand["id"])
+    for q in harvested:
+        candidates.append((q, "harvest", 0))
+    if harvested:
+        sources_used.append("harvest")
+
+    seeds = competitors.tracked_keywords(brand)
+    for q in seeds:
+        candidates.append((q, "seed", 0))
+    if seeds:
+        sources_used.append("seed")
+
+    previous = {_norm(q["query"]): q for q in (latest_pool(brand["id"]) or {}).get("queries", [])}
+    stamp = _now().isoformat(timespec="seconds")
+
+    chosen: dict[str, dict] = {}
+    for label, source, impressions in candidates:
+        key = _norm(label)
+        if not key or len(key) > MAX_QUERY_LEN or key in chosen:
+            continue
+        if len(chosen) >= MAX_POOL:
+            break
+        chosen[key] = {
+            "query": label.strip(),
+            "source": source,
+            "impressions": impressions,
+            "added_at": previous.get(key, {}).get("added_at", stamp),
+            "active": True,
+        }
+
+    # A query that left the pool keeps its row, deactivated: its history is
+    # still worth reading, and a deleted row would orphan it.
+    for key, old in previous.items():
+        if key not in chosen:
+            chosen[key] = {**old, "active": False}
+
+    doc = {
+        "queries": list(chosen.values()),
+        "built_at": stamp,
+        "sources_used": sources_used,
+        "notes": notes,
+    }
+    state.save(POOL_DOC.format(brand["id"]), doc)
+    return doc
+
+
+def latest_pool(brand_id: str) -> dict | None:
+    return state.load(POOL_DOC.format(brand_id))
+
+
+def active_queries(brand_id: str) -> list[str]:
+    return [q["query"] for q in (latest_pool(brand_id) or {}).get("queries", []) if q.get("active")]
