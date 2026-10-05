@@ -641,3 +641,71 @@ def test_sweep_rolls_up_again_on_a_new_utc_date(monkeypatch):
     rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")), now=_at(6, 9))
 
     assert calls == [1, 1]
+
+
+def test_position_band_peaks_in_striking_distance():
+    assert rt._position_band(8) > rt._position_band(2)     # already won: low value
+    assert rt._position_band(8) > rt._position_band(60)    # unwinnable: low value
+    assert rt._position_band(None) < rt._position_band(8)  # unranked: floor, not zero
+    assert rt._position_band(None) > 0
+
+
+def _seed_latest(rows, rivals=("rival.com",)):
+    from seo_geo_agent import jobs as j
+    j.save_list(rt.LATEST_PREFIX.format("b1"), rows,
+                meta={"at": "2026-10-05T09:00:00+00:00", "ranked": len(rows),
+                      "errors": 0, "rivals": list(rivals)})
+
+
+def test_worklist_ranks_high_demand_striking_distance_queries_first(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("winnable", 5000), ("obscure", 5),
+                                                     ("already won", 9000)), []))
+    _seed_latest([
+        {"query": "winnable", "position": 8, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "https://rival.com/a", "title": ""}]},
+        {"query": "obscure", "position": 7, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "other.com", "url": "https://other.com/a", "title": ""}]},
+        {"query": "already won", "position": 1, "url": "", "error": None, "top": []},
+    ])
+
+    rows = rt.worklist(_brand())
+
+    assert [r["query"] for r in rows][:1] == ["winnable"]
+    assert rows[0]["leader"] == "rival.com" and rows[0]["tracked_rival"] is True
+    assert "already won" not in [r["query"] for r in rows[:2]]
+
+
+def test_worklist_excludes_errored_rows():
+    _seed_latest([{"query": "broken", "position": None, "url": "",
+                   "error": "serper 429", "top": []}])
+    assert rt.worklist(_brand()) == []
+
+
+def test_worklist_promotes_a_query_that_lost_ground_this_week():
+    _seed_latest([
+        {"query": "slipping", "position": 12, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+        {"query": "steady", "position": 12, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+    ])
+    rt.append_history("b1", [_result("slipping", 4), _result("steady", 12)], [],
+                      now=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    rt.append_history("b1", [_result("slipping", 12), _result("steady", 12)], [],
+                      now=datetime(2026, 10, 5, tzinfo=timezone.utc))
+
+    rows = rt.worklist(_brand())
+
+    assert rows[0]["query"] == "slipping"
+    assert rows[0]["delta_7d"] == -8      # negative = we fell
+
+
+def test_worklist_respects_the_limit():
+    _seed_latest([
+        {"query": f"q{n}", "position": 9, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]}
+        for n in range(30)
+    ])
+    assert len(rt.worklist(_brand(), limit=5)) == 5

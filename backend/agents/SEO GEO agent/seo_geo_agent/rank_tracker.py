@@ -456,3 +456,111 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
 
     return {"checked": len(results), "ranked": ranked, "errors": errors, "blocked": blocked,
             "at": moment.isoformat(timespec="seconds"), "notes": notes}
+
+
+#: Below this the query is already won and effort is better spent elsewhere;
+#: above the upper bound it is not winnable inside a quarter.
+STRIKING_LOW, STRIKING_HIGH = 4, 20
+#: Unranked queries stay visible but sink below winnable work.
+UNRANKED_BAND = 0.15
+
+
+def _position_band(position: int | None) -> float:
+    """Value of moving this query, by where it currently sits."""
+    if position is None:
+        return UNRANKED_BAND
+    if position < STRIKING_LOW:
+        return 0.2          # already on page one's top half
+    if position <= STRIKING_HIGH:
+        return 1.0          # striking distance — the whole point of the list
+    if position <= 40:
+        return 0.5
+    return 0.1
+
+
+def delta(brand_id: str, query: str, hours: int) -> int | None:
+    """Positions gained since ``hours`` ago. Negative = we fell. None = no basis.
+
+    The baseline is the most recent point at or before the cutoff, and when the
+    series is younger than the window, its earliest point instead. Requiring a
+    point older than the cutoff would report None for every query during the
+    tracker's first week — exactly when the owner is watching hardest.
+    """
+    row = history_for(brand_id, query)
+    if not row or not row.get("raw"):
+        return None
+    points = [p for p in row["raw"] if p[1] is not None]
+    if len(points) < 2 or points[-1][1] is None:
+        return None
+    now_point = points[-1]
+    cutoff = now_point[0] - hours
+    older = [p for p in points[:-1] if p[0] <= cutoff]
+    baseline = older[-1] if older else points[0]
+    return baseline[1] - now_point[1]
+
+
+def worklist(brand: dict, limit: int = 10) -> list[dict]:
+    """Order the losing queries by how much a win is worth times how winnable it is.
+
+    Deliberately arithmetic rather than an LLM judgement: this list decides
+    where a person spends their week, so it has to be explainable, stable
+    between runs, and testable.
+    """
+    brand_id = brand["id"]
+    impressions = {_norm(q["query"]): int(q.get("impressions") or 0)
+                   for q in (latest_pool(brand_id) or {}).get("queries", [])}
+    rivals = {d.lower() for d in (brand.get("competitors") or [])}
+
+    rows: list[dict] = []
+    for result in latest_rows(brand_id):
+        if result.get("error"):
+            continue
+        position = result.get("position")
+        top = result.get("top") or []
+        above = [e for e in top if position is None or e["position"] < position]
+        leader = above[0] if above else None
+        if not leader:
+            continue  # nobody is beating us here
+
+        shown = impressions.get(_norm(result["query"]), 0)
+        demand = math.log1p(shown) if shown else 1.0
+        band = _position_band(position)
+        tracked = leader["domain"] in rivals
+        # A rival we already profile is a gap we can actually analyse.
+        gap = 1.4 if tracked else 1.0
+        moved = delta(brand_id, result["query"], hours=7 * 24)
+        # A live regression outranks a long-standing weakness.
+        trend = 1.6 if (moved is not None and moved < 0) else 1.0
+
+        rows.append({
+            "query": result["query"],
+            "position": position,
+            "impressions": shown,
+            "leader": leader["domain"],
+            "leader_position": leader["position"],
+            "leader_url": leader["url"],
+            "tracked_rival": tracked,
+            "delta_7d": moved,
+            "score": round(demand * band * gap * trend, 3),
+            "reason": _reason(position, shown, tracked, moved),
+        })
+
+    rows.sort(key=lambda r: -r["score"])
+    return rows[:limit]
+
+
+def _reason(position, impressions, tracked, moved) -> str:
+    bits = []
+    if position is None:
+        bits.append("not ranking")
+    elif STRIKING_LOW <= position <= STRIKING_HIGH:
+        bits.append(f"#{position} — striking distance")
+    else:
+        bits.append(f"#{position}")
+    if impressions:
+        bits.append(f"{impressions:,} impressions/28d")
+    if tracked:
+        bits.append("a tracked competitor is above us")
+    if moved is not None and moved < 0:
+        bits.append(f"down {abs(moved)} this week")
+    return "; ".join(bits)
