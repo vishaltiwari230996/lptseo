@@ -20,8 +20,24 @@ import httpx
 
 from . import state
 
-SERPER_ENDPOINT = "https://google.serper.dev/search"
+DATAFORSEO_ENDPOINT = "https://api.dataforseo.com/v3/serp/google/organic/live/advanced"
+# India — the brand's home market (Law Prep Tutorial, Jodhpur). Serper had no
+# geo/language params at all (plain google.com), so this is a deliberate
+# improvement, not just a like-for-like swap.
+DATAFORSEO_LOCATION_CODE = 2356
+DATAFORSEO_LANGUAGE_CODE = "en"
 FETCH_UA = "Mozilla/5.0 (compatible; LawPrepTutorial-SEO/1.0)"
+REAL_SERPER_ENDPOINT = "https://google.serper.dev/search"
+
+# Rank tracking reads India, in English, at country level. City-level targeting
+# would produce a local SERP that misrepresents a nationally-competing brand.
+# The DataForSEO path above already pins the same market (location_code 2356).
+SERP_COUNTRY = "in"
+SERP_LANGUAGE = "en"
+#: 20 so positions 11-20 — the striking-distance band the worklist scores on —
+#: are visible at all. See the credit-verification step in Task 13 before
+#: raising this.
+SERP_RESULTS = 20
 
 # --- Deadlines -------------------------------------------------------------
 # These run in sync handlers, i.e. on one of anyio's 40 worker threads, so a
@@ -286,36 +302,135 @@ def gsc_fetch(prop: str, start: date, end: date, service=None) -> list[QueryStat
     ]
 
 
-def _serper_key() -> str:
-    """Env var first; in cloud mode fall back to the admin-managed app config
-    (Firestore ``app_config/global`` → ``seo_serper_api_key``) so prod works
-    without a Cloud Run env change. Offline mode never touches Firestore."""
-    key = os.environ.get("SEO_SERPER_API_KEY", "")
-    if key or not state.use_cloud():
-        return key
+def _dataforseo_auth() -> tuple[str, str] | None:
+    """Env vars first; in cloud mode fall back to the admin-managed app config
+    (Firestore ``app_config/global`` → ``dataforseo_login``/``dataforseo_password``)
+    so prod works without a Cloud Run env change. Offline mode never touches
+    Firestore. DataForSEO is Basic-Auth (one credential, two halves) rather
+    than Serper's single header key."""
+    login = os.environ.get("DATAFORSEO_LOGIN", "")
+    password = os.environ.get("DATAFORSEO_PASSWORD", "")
+    if login and password:
+        return (login, password)
+    if not state.use_cloud():
+        return None
     try:
         from app.services.firestore_repo import get_app_config
 
-        return str(get_app_config().get("seo_serper_api_key") or "")
+        cfg = get_app_config()
+        login = str(cfg.get("dataforseo_login") or "")
+        password = str(cfg.get("dataforseo_password") or "")
+        return (login, password) if login and password else None
     except Exception:  # noqa: BLE001 — config unreachable = no key, honestly
-        return ""
+        return None
 
 
 def serper_available() -> bool:
-    return bool(_serper_key()) and state.use_network()
+    return _dataforseo_auth() is not None and state.use_network()
 
 
 def serper_search(query: str, client: httpx.Client | None = None) -> dict:
-    """One Google SERP via Serper: organic top-10, related searches, PAA, AIO flag."""
-    key = _serper_key()
+    """One Google SERP via DataForSEO: organic top-10, related searches, PAA, AIO flag.
+
+    Kept the ``serper_*`` names — every caller (keywords/competitors/topics,
+    the router's source-availability flag) only depends on this function's
+    signature and the normalized dict it returns, not on Serper itself.
+    """
+    auth = _dataforseo_auth()
+    if not auth or not state.use_network():
+        raise CredentialMissing("DATAFORSEO_LOGIN/DATAFORSEO_PASSWORD not set")
+    own = client is None
+    cli = client or httpx.Client(timeout=30)
+    try:
+        resp = cli.post(
+            DATAFORSEO_ENDPOINT,
+            json=[
+                {
+                    "keyword": query,
+                    "location_code": DATAFORSEO_LOCATION_CODE,
+                    "language_code": DATAFORSEO_LANGUAGE_CODE,
+                    "device": "desktop",
+                    "depth": 10,
+                }
+            ],
+            auth=auth,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    finally:
+        if own:
+            cli.close()
+
+    tasks = data.get("tasks") or []
+    result = (tasks[0].get("result") or [{}])[0] if tasks else {}
+    items = result.get("items") or []
+
+    organic: list[dict] = []
+    related: list[str] = []
+    paa: list[str] = []
+    aio_present = False
+    for item in items:
+        item_type = item.get("type")
+        if item_type == "organic":
+            organic.append(
+                {
+                    "link": item.get("url", ""),
+                    "title": item.get("title", ""),
+                    "position": item.get("rank_group", len(organic) + 1),
+                }
+            )
+        elif item_type == "related_searches":
+            for entry in item.get("items") or []:
+                text = entry if isinstance(entry, str) else (entry or {}).get("query")
+                if text:
+                    related.append(text)
+        elif item_type == "people_also_ask":
+            for entry in item.get("items") or []:
+                question = entry.get("title") if isinstance(entry, dict) else None
+                if question:
+                    paa.append(question)
+        elif item_type in ("ai_overview", "generative_ai_overview"):
+            aio_present = True
+
+    return {
+        "organic": organic[:10],
+        "related": related,
+        "paa": paa,
+        "aio_present": aio_present,
+    }
+
+
+def _real_serper_key() -> str:
+    """Env var only — deliberately no Firestore admin-config fallback (that
+    exists for DataForSEO specifically). This key is kept on its own so
+    competitor rank tracking can never silently fall back to the DataForSEO
+    provider serper_search() actually calls."""
+    return os.environ.get("SEO_SERPER_API_KEY", "").strip()
+
+
+def brand_rank_available() -> bool:
+    return bool(_real_serper_key()) and state.use_network()
+
+
+def brand_rank_search(query: str, client: httpx.Client | None = None, *,
+                      gl: str = SERP_COUNTRY, hl: str = SERP_LANGUAGE,
+                      num: int = SERP_RESULTS) -> dict:
+    """One Google SERP via real Serper.dev — used ONLY by competitor rank
+    tracking (competitors.rank_snapshot). Every other caller in this codebase
+    (Keyword Lab, SERP X-ray, competitor profiles) stays on serper_search()'s
+    DataForSEO backend; the two providers must never be conflated. Same
+    return shape as serper_search() so rank_snapshot() doesn't care which
+    provider answered.
+    """
+    key = _real_serper_key()
     if not key or not state.use_network():
         raise CredentialMissing("SEO_SERPER_API_KEY not set")
     own = client is None
     cli = client or httpx.Client(timeout=20)
     try:
         resp = cli.post(
-            SERPER_ENDPOINT,
-            json={"q": query, "num": 10},
+            REAL_SERPER_ENDPOINT,
+            json={"q": query, "num": num, "gl": gl, "hl": hl},
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
         )
         resp.raise_for_status()
@@ -326,7 +441,7 @@ def serper_search(query: str, client: httpx.Client | None = None) -> dict:
     return {
         "organic": [
             {"link": r.get("link", ""), "title": r.get("title", ""), "position": r.get("position", i + 1)}
-            for i, r in enumerate(data.get("organic", [])[:10])
+            for i, r in enumerate(data.get("organic", [])[:num])
         ],
         "related": [r.get("query", "") for r in data.get("relatedSearches", []) if r.get("query")],
         "paa": [q.get("question", "") for q in data.get("peopleAlsoAsk", []) if q.get("question")],
