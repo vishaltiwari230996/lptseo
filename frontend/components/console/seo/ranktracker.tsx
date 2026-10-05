@@ -425,7 +425,13 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                     on the backend computes delta_7d, leader fields and impressions for all
                     200 rows, not just the worklist's top 10, so there is no
                     `top[0]` fallback left here. A row with no leader (we rank
-                    #1) truthfully shows "—", not a guess. */}
+                    #1) truthfully shows "—", not a guess.
+                    All three nullable numeric fields (`position`, `delta_7d`,
+                    `impressions`) are checked with `!= null`, never truthily —
+                    a real 0 (held position exactly, or a custom/harvested/seed
+                    query `build_pool` seeds at 0 impressions by construction)
+                    is information, not absence, same rule this file already
+                    applies to `RankDaily` and `RankGap`'s metrics. */}
                 {rows.map((r) => {
                   const delta = r.delta_7d;
                   return (
@@ -436,7 +442,7 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                         {delta == null ? "—" : delta > 0 ? `+${delta}` : `${delta}`}
                       </td>
                       <td>{r.leader ? `${r.leader}${r.leader_position != null ? ` #${r.leader_position}` : ""}` : "—"}</td>
-                      <td className="num">{r.impressions ? fmt(r.impressions) : "—"}</td>
+                      <td className="num">{r.impressions != null ? fmt(r.impressions) : "—"}</td>
                     </tr>
                   );
                 })}

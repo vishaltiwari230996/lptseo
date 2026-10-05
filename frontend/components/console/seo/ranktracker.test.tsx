@@ -257,6 +257,34 @@ describe("RankTrackerView", () => {
     expect(within(syllabusRow).getByText("—")).toBeInTheDocument();
   });
 
+  // Review round 2, Finding (Important): `r.impressions ? ... : "—"` was a
+  // truthy check, not a nullish one — a row with a real `impressions: 0`
+  // (every custom/harvested/seed query `build_pool` seeds at exactly 0,
+  // which is most of the ~190 rows this task newly surfaced) rendered as a
+  // dash, indistinguishable from missing data. Same anti-pattern this file
+  // already guards against for `RankDaily` and `RankGap`'s metrics — it
+  // just reappeared here, in a third place, on this round's new field.
+  it("renders a real impressions value of 0, not a dash", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      rows: [
+        { query: "clat coaching", position: 8, url: "", checked_at: "", error: null,
+          top: [{ position: 1, domain: "rival.com", url: "https://rival.com/a", title: "" }],
+          impressions: 5000, delta_7d: -3, dropped: false,
+          leader: "rival.com", leader_position: 1, leader_url: "https://rival.com/a" },
+        // A custom/harvested/seed query build_pool seeded at impressions: 0 —
+        // a genuine, informative zero, not an unknown.
+        { query: "clat admission form", position: 15, url: "", checked_at: "", error: null, top: [],
+          impressions: 0, delta_7d: null, dropped: false,
+          leader: null, leader_position: null, leader_url: null },
+      ],
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    const row = screen.getByText("clat admission form").closest("tr") as HTMLElement;
+    expect(within(row).getByText("0")).toBeInTheDocument();   // impressions: 0 — not "—"
+  });
+
   // Review Finding 4 (Minor): gapBusy was a single shared boolean, so loading
   // one row's gap disabled every other row's "Why?" button. briefBusy in the
   // same file is already keyed per query — this matches it.
