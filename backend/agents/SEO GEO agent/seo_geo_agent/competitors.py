@@ -109,8 +109,17 @@ def rank_snapshot(brand: dict, search=None) -> dict:
 
     rows = rank_tracker.latest_rows(brand["id"])
     meta = rank_tracker.latest_meta(brand["id"]) or {}
+    existing = state.load(f"ranks-{brand['id']}") or {"snapshots": [], "suggested_competitors": []}
     if not rows:
-        return state.load(f"ranks-{brand['id']}") or {"snapshots": [], "suggested_competitors": []}
+        return existing
+    if all(row.get("error") for row in rows):
+        # Every row in the latest sweep errored (provider outage/rate-limit).
+        # Writing an empty snapshot here would, via the same-day dedup below,
+        # *replace* a real snapshot already recorded for today — a Serper
+        # outage silently erasing a day of real rankings. ``append_history``
+        # already guards the sweep side against exactly this by skipping
+        # errored results; this is the matching guard on the projection side.
+        return existing
 
     ranks: dict[str, dict] = {}
     seen_domains: dict[str, int] = {}

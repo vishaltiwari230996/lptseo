@@ -180,6 +180,31 @@ def test_rank_snapshot_dedupes_same_calendar_day():
     assert doc["snapshots"][0]["ranks"]["legal virtual assistant"]["position"] == 2
 
 
+def test_rank_snapshot_ignores_a_total_outage_and_keeps_todays_snapshot():
+    """If every row in the latest sweep errored (Serper rate-limit/outage),
+    projecting an empty ranks dict would, via the same-day dedup, *replace*
+    the real snapshot already recorded for today. rank_tracker.append_history
+    already skips errored rows for exactly this reason; rank_snapshot needs
+    the matching guard: on a total-error sweep, leave the stored doc alone."""
+    from seo_geo_agent import jobs, rank_tracker
+
+    _seed_rank_tracker_latest("outage-brand", 4, "2026-10-05T09:00:00+00:00")
+    good = competitors.rank_snapshot({**BRAND, "id": "outage-brand"})
+    assert good["snapshots"][0]["ranks"]["legal virtual assistant"]["position"] == 4
+
+    jobs.save_list(rank_tracker.LATEST_PREFIX.format("outage-brand"), [
+        {"query": "legal virtual assistant", "position": None, "url": "", "top": [],
+         "error": "serper 429"},
+        {"query": "some other query", "position": None, "url": "", "top": [],
+         "error": "serper 429"},
+        {"query": "a third query", "position": None, "url": "", "top": [],
+         "error": "timeout"},
+    ], meta={"at": "2026-10-05T15:00:00+00:00", "ranked": 0, "errors": 3, "rivals": []})
+
+    after_outage = competitors.rank_snapshot({**BRAND, "id": "outage-brand"})
+    assert after_outage == good  # untouched: still today's real snapshot, not erased
+
+
 def test_rank_tracking_pool_prioritizes_custom_then_auto_then_pool_terms(monkeypatch):
     brand = {**BRAND, "id": "pool-brand", "seeds": ["seed one"]}
     competitors.add_custom_query("pool-brand", "custom query one")
@@ -211,6 +236,32 @@ def test_add_custom_query_caps_total_stored_queries():
     # Re-adding (or no-op adding) an existing query is never blocked by the cap.
     existing = competitors.add_custom_query(brand_id, "query 0")
     assert len(existing) == competitors.MAX_CUSTOM_QUERIES
+
+
+def test_custom_query_reaches_the_snapshot_through_the_real_sweep_pipeline():
+    """The user-visible promise of the whole feature, end to end, with no
+    persistence monkeypatched: a custom query added through the real
+    ``add_custom_query`` must be picked up by ``rank_tracker.build_pool`` (the
+    pool the scheduled sweep actually consumes — NOT the legacy
+    ``competitors.rank_tracking_pool``, which nothing live calls any more),
+    survive a sweep, and show up in ``rank_snapshot``'s projected snapshot.
+    Only the outbound SERP call is faked."""
+    from seo_geo_agent import rank_tracker
+
+    brand = {"id": "custom-e2e", "name": "Acme", "domain": "x.com",
+             "seeds": [], "competitors": []}
+    competitors.add_custom_query(brand["id"], "my custom query")
+
+    rank_tracker.build_pool(brand, rows_fn=lambda b: ([], []))
+
+    def fake_search(q):
+        return {"organic": [{"link": "https://x.com/custom-page", "title": "Us", "position": 7}],
+                "related": [], "paa": []}
+
+    rank_tracker.sweep(brand, search=fake_search)
+
+    doc = competitors.rank_snapshot(brand)
+    assert doc["snapshots"][-1]["ranks"]["my custom query"]["position"] == 7
 
 
 def test_sitemap_watch_flags_new_content():
