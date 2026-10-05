@@ -28,6 +28,8 @@ const seoRankSweep = vi.fn();
 const seoRankPoolRebuild = vi.fn();
 const seoRankGap = vi.fn();
 const seoBuildBrief = vi.fn();
+const seoAddCustomQuery = vi.fn();
+const seoRemoveCustomQuery = vi.fn();
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -39,6 +41,8 @@ vi.mock("@/lib/api", async () => {
     seoRankPoolRebuild: (...args: unknown[]) => seoRankPoolRebuild(...args),
     seoRankGap: (...args: unknown[]) => seoRankGap(...args),
     seoBuildBrief: (...args: unknown[]) => seoBuildBrief(...args),
+    seoAddCustomQuery: (...args: unknown[]) => seoAddCustomQuery(...args),
+    seoRemoveCustomQuery: (...args: unknown[]) => seoRemoveCustomQuery(...args),
   };
 });
 
@@ -47,6 +51,10 @@ vi.mock("@/lib/api", async () => {
 const HOUR_2026_10_02_09 = Math.floor(Date.UTC(2026, 9, 2, 9) / 3600_000);
 
 afterEach(cleanup);
+// These module-level vi.fn() mocks persist across every test in this file —
+// without clearing, a later test's "Nth call" assertion sees an earlier
+// test's leftover call history.
+afterEach(() => vi.clearAllMocks());
 
 function doc(over: Partial<RankTrackerDoc> = {}): RankTrackerDoc {
   return {
@@ -80,7 +88,7 @@ function doc(over: Partial<RankTrackerDoc> = {}): RankTrackerDoc {
     pool: { size: 3, cap: 200, built_at: "2026-10-05T06:00:00+00:00",
             sources_used: ["custom", "gsc"], notes: [] },
     budget: { date: "2026-10-05", searches: 36, cap: 3000, remaining: 2964 },
-    competitors: ["rival.com"], enabled: true, job: null, last_sweep: null,
+    competitors: ["rival.com"], custom_queries: [], enabled: true, job: null, last_sweep: null,
     ...over,
   };
 }
@@ -490,5 +498,36 @@ describe("RankTrackerView", () => {
     expect(screen.queryByText(/last sweep failed/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/switched off/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run now/i })).not.toBeDisabled();
+  });
+
+  it("lets the user add a query to track and shows it in the list", async () => {
+    seoRankTracker.mockResolvedValue(doc({ custom_queries: ["existing query"] }));
+    seoAddCustomQuery.mockResolvedValue({ custom_queries: ["existing query", "new query"] });
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("existing query")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText(/you decide what to monitor/i), { target: { value: "new query" } });
+    fireEvent.click(screen.getByRole("button", { name: /add queries/i }));
+
+    await waitFor(() => expect(seoAddCustomQuery).toHaveBeenCalledWith("b1", "new query"));
+    await waitFor(() => expect(screen.getByText("new query")).toBeInTheDocument());
+  });
+
+  it("adds a whole pasted list of queries, one per line, in one click", async () => {
+    seoRankTracker.mockResolvedValue(doc({ custom_queries: [] }));
+    seoAddCustomQuery
+      .mockResolvedValueOnce({ custom_queries: ["query one"] })
+      .mockResolvedValueOnce({ custom_queries: ["query one", "query two"] });
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText(/you decide what to monitor/i), {
+      target: { value: "query one\nquery two" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add queries/i }));
+
+    await waitFor(() => expect(seoAddCustomQuery).toHaveBeenCalledTimes(2));
+    expect(seoAddCustomQuery).toHaveBeenNthCalledWith(1, "b1", "query one");
+    expect(seoAddCustomQuery).toHaveBeenNthCalledWith(2, "b1", "query two");
   });
 });

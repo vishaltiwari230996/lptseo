@@ -3084,6 +3084,7 @@ export interface RankTrackerDoc {
   pool: RankPool;
   budget: RankBudget;
   competitors: string[];
+  custom_queries: string[];
   enabled: boolean;
   job: DeepJob | null;
   /** null before any sweep has ever run — distinct from a sweep that ran and

@@ -13,6 +13,10 @@ afterEach(cleanup);
 
 describe("CompetitorsView custom queries", () => {
   beforeEach(() => {
+    // vi.spyOn on an already-spied method reuses the same spy instance, so
+    // its call history accumulates across tests unless cleared here —
+    // without this, test 2's "first call" assertion sees test 1's leftover.
+    vi.clearAllMocks();
     vi.spyOn(api, "seoCompetitors").mockResolvedValue({
       tracked: [], suggested: [], shifts: [], feed: {},
       custom_queries: ["existing query"], pool_size: 16, pool_cap: 50,
@@ -32,9 +36,26 @@ describe("CompetitorsView custom queries", () => {
     render(<CompetitorsView brandId="b1" isCreator={true} onToast={vi.fn()} />);
     await waitFor(() => expect(screen.getByText("existing query")).toBeInTheDocument());
 
-    fireEvent.change(screen.getByPlaceholderText(/add a query/i), { target: { value: "new query" } });
-    fireEvent.click(screen.getByRole("button", { name: /add/i }));
+    fireEvent.change(screen.getByLabelText(/add the exact queries you want tracked/i), { target: { value: "new query" } });
+    fireEvent.click(screen.getByRole("button", { name: /add queries/i }));
 
     await waitFor(() => expect(addSpy).toHaveBeenCalledWith("b1", "new query"));
+  });
+
+  it("adds a whole pasted list of queries, one per line, in one click", async () => {
+    const addSpy = vi.spyOn(api, "seoAddCustomQuery")
+      .mockResolvedValueOnce({ custom_queries: ["existing query", "query one"], pool_size: 17 })
+      .mockResolvedValueOnce({ custom_queries: ["existing query", "query one", "query two"], pool_size: 18 });
+    render(<CompetitorsView brandId="b1" isCreator={true} onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("existing query")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText(/add the exact queries you want tracked/i), {
+      target: { value: "query one\nquery two" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add queries/i }));
+
+    await waitFor(() => expect(addSpy).toHaveBeenCalledTimes(2));
+    expect(addSpy).toHaveBeenNthCalledWith(1, "b1", "query one");
+    expect(addSpy).toHaveBeenNthCalledWith(2, "b1", "query two");
   });
 });

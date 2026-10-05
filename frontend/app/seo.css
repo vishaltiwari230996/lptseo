@@ -375,8 +375,13 @@ a.seo-pages__path:hover { color: var(--green-500); }
 
 /* Custom query pool: add/remove + "N of cap" indicator ---------------------- */
 .seo-comp__queries { display: grid; gap: 8px; margin-bottom: 12px; }
-.seo-comp__query-add { display: flex; gap: 8px; }
+.seo-comp__query-add { display: flex; gap: 8px; align-items: flex-end; }
 .seo-comp__query-list { display: flex; gap: 6px; flex-wrap: wrap; }
+.seo-comp__query-label { font: 500 12.5px/1.4 var(--font-sans); color: var(--text-secondary); }
+.seo-comp__query-textarea {
+  flex: 1 1 auto; min-width: 240px; resize: vertical;
+  font: 500 13px/1.5 var(--font-sans);
+}
 
 /* =========================================================================
    Premium pass — added with the Law Prep Tutorial rebrand.
@@ -734,6 +739,8 @@ a.seo-pages__path:hover { color: var(--green-500); }
 }
 .seo-rank__head-meta strong { color: var(--text-primary); font-weight: 650; }
 .seo-rank__head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.seo-rank__queries { display: grid; gap: 8px; margin: 12px 0; }
 
 .seo-rank__job {
   display: inline-flex; align-items: center; gap: 8px;

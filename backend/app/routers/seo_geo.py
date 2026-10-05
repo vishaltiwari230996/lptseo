@@ -866,6 +866,10 @@ def _rank_payload(brand: dict) -> dict:
         },
         "budget": seo_rank.budget_status(brand_id),
         "competitors": seo_rank.tracked_rivals(brand),
+        # Surfaced here too (already returned by the Competitors panel's own
+        # GET) so this tab's own query-management UI doesn't need a second
+        # fetch — rank_tracker.build_pool() already reads this same list.
+        "custom_queries": seo_competitors.list_custom_queries(brand_id),
         "enabled": seo_rank.enabled(brand),
         "job": seo_jobs.status(seo_rank.JOB_KIND, brand_id),
         # What the last sweep actually did. `job` only says the background

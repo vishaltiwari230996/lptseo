@@ -21,7 +21,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isAbortError, RequestSequence,
-  seoBuildBrief, seoRankGap, seoRankHistory, seoRankPoolRebuild, seoRankSweep, seoRankTracker,
+  seoAddCustomQuery, seoBuildBrief, seoRankGap, seoRankHistory, seoRankPoolRebuild,
+  seoRankSweep, seoRankTracker, seoRemoveCustomQuery,
   type DeepJob, type RankDaily, type RankGap, type RankHistory, type RankPoint,
   type RankRow, type RankSweepOutcome, type RankTrackerDoc,
 } from "@/lib/api";
@@ -289,6 +290,8 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
   const [sweepBusy, setSweepBusy] = useState(false);
   const [poolBusy, setPoolBusy] = useState(false);
   const [briefBusy, setBriefBusy] = useState<string | null>(null);
+  const [newQuery, setNewQuery] = useState("");
+  const [queryBusy, setQueryBusy] = useState(false);
   const drawerRef = useRef<HTMLDivElement | null>(null);
 
   // The drawer loads two different entities (history, gap) into the same
@@ -420,6 +423,56 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
     }
   }
 
+  // Custom queries land in the SAME pool build_pool() already reads
+  // (competitors.list_custom_queries) — they don't appear in rows/worklist
+  // until "Rebuild pool" runs, since this tab's pool is a manually-rebuilt
+  // snapshot, not computed fresh on every load.
+  //
+  // Paste a whole list at once — one per line, or comma-separated, or both.
+  // Each goes through the same single-query endpoint (there's no bulk route),
+  // but sequentially from one button press so the user never has to do this
+  // one query at a time.
+  async function addQuery() {
+    const queries = Array.from(
+      new Set(
+        newQuery
+          .split(/[\n,]/)
+          .map((q) => q.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (!queries.length) return;
+    setQueryBusy(true);
+    let added = 0;
+    try {
+      for (const query of queries) {
+        const res = await seoAddCustomQuery(brandId, query);
+        added += 1;
+        setDoc((d) => d && { ...d, custom_queries: res.custom_queries });
+      }
+      setNewQuery("");
+      onToast(
+        (added === 1 ? "Query added" : `${added} queries added`) +
+          " — click “Rebuild pool” to start tracking them",
+        "ok",
+      );
+    } catch (e) {
+      const fallback = added ? `Added ${added} of ${queries.length} before this failed` : "Could not add query";
+      onToast(errMsg(e, fallback), "error");
+    } finally {
+      setQueryBusy(false);
+    }
+  }
+
+  async function removeQuery(query: string) {
+    try {
+      const res = await seoRemoveCustomQuery(brandId, query);
+      setDoc((d) => d && { ...d, custom_queries: res.custom_queries });
+    } catch (e) {
+      onToast(errMsg(e, "Could not remove query"), "error");
+    }
+  }
+
   const rows = useMemo(
     () => (doc?.rows ?? []).filter((r) => !r.error && matches(r, filter)),
     [doc, filter],
@@ -487,6 +540,42 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                         onClick={() => void rebuildPool()}>
                   Rebuild pool
                 </button>
+              </div>
+            )}
+          </div>
+
+          <div className="seo-rank__queries">
+            {isCreator && (
+              <>
+                <label className="seo-comp__query-label" htmlFor="rank-query-bulk">
+                  You decide what to monitor — add the exact queries you care about (one per line,
+                  or comma-separated — paste a whole list at once):
+                </label>
+                <div className="seo-comp__query-add">
+                  <textarea
+                    id="rank-query-bulk"
+                    className="seo-input seo-comp__query-textarea"
+                    placeholder={"clat coaching in jaipur\njudiciary exam preparation\nbest law entrance coaching"}
+                    rows={3}
+                    value={newQuery}
+                    onChange={(e) => setNewQuery(e.target.value)}
+                  />
+                  <button className="seo-btn seo-btn--primary" disabled={queryBusy || !newQuery.trim()}
+                          onClick={() => void addQuery()}>
+                    {queryBusy ? "Adding…" : "Add queries"}
+                  </button>
+                </div>
+              </>
+            )}
+            {!!doc.custom_queries.length && (
+              <div className="seo-comp__query-list">
+                {doc.custom_queries.map((q) => (
+                  <span key={q} className="seo-chip">
+                    {q}
+                    <button className="seo-chip__x" aria-label={`Remove ${q}`}
+                            onClick={() => void removeQuery(q)}>×</button>
+                  </span>
+                ))}
               </div>
             )}
           </div>

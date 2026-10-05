@@ -316,16 +316,33 @@ export function CompetitorsView({ brandId, isCreator, onToast }: {
     }
   }
 
+  // Paste a whole list at once — one per line, or comma-separated, or both.
+  // Each goes through the same single-query endpoint (there's no bulk route),
+  // but sequentially from one button press so the user never has to do this
+  // one query at a time.
   async function addQuery() {
-    const query = newQuery.trim();
-    if (!query) return;
+    const queries = Array.from(
+      new Set(
+        newQuery
+          .split(/[\n,]/)
+          .map((q) => q.trim())
+          .filter(Boolean),
+      ),
+    );
+    if (!queries.length) return;
     setQueryBusy(true);
+    let added = 0;
     try {
-      const res = await seoAddCustomQuery(brandId, query);
-      setData((d) => d && { ...d, custom_queries: res.custom_queries, pool_size: res.pool_size });
+      for (const query of queries) {
+        const res = await seoAddCustomQuery(brandId, query);
+        added += 1;
+        setData((d) => d && { ...d, custom_queries: res.custom_queries, pool_size: res.pool_size });
+      }
       setNewQuery("");
+      onToast(added === 1 ? "Query added" : `${added} queries added`, "ok");
     } catch (e) {
-      onToast(errMsg(e, "Could not add query"), "error");
+      const fallback = added ? `Added ${added} of ${queries.length} before this failed` : "Could not add query";
+      onToast(errMsg(e, fallback), "error");
     } finally {
       setQueryBusy(false);
     }
@@ -460,18 +477,25 @@ export function CompetitorsView({ brandId, isCreator, onToast }: {
         <div className="seo-comp__queries">
           <div className="seo-lab__meta">
             Tracking {data?.pool_size ?? 0} of {data?.pool_cap ?? 50} possible queries
+            {!!data?.custom_queries.length && ` · ${data.custom_queries.length} of those are yours`}
           </div>
           {isCreator && (
             <div className="seo-comp__query-add">
-              <input
-                className="seo-input"
-                placeholder="Add a query to track…"
+              <label className="seo-comp__query-label" htmlFor="comp-query-bulk">
+                You know your own business best — add the exact queries you want tracked (one per
+                line, or comma-separated — paste a whole list at once):
+              </label>
+              <textarea
+                id="comp-query-bulk"
+                className="seo-input seo-comp__query-textarea"
+                placeholder={"clat coaching in jaipur\njudiciary exam preparation\nbest law entrance coaching"}
+                rows={3}
                 value={newQuery}
                 onChange={(e) => setNewQuery(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && void addQuery()}
               />
-              <button className="seo-btn" disabled={queryBusy || !newQuery.trim()} onClick={() => void addQuery()}>
-                Add
+              <button className="seo-btn seo-btn--primary" disabled={queryBusy || !newQuery.trim()}
+                      onClick={() => void addQuery()}>
+                {queryBusy ? "Adding…" : "Add queries"}
               </button>
             </div>
           )}
