@@ -29,6 +29,8 @@ from seo_geo_agent import competitors as seo_competitors
 from seo_geo_agent import insights, keyword_pool as seo_kwpool, keywords as seo_keywords, sources
 from seo_geo_agent import pages as seo_pages
 from seo_geo_agent import priorities as seo_priorities
+from seo_geo_agent import rank_gap as seo_rank_gap
+from seo_geo_agent import rank_tracker as seo_rank
 from seo_geo_agent import sitemap_health as seo_sitemap
 from seo_geo_agent import cannibalization as seo_cannibal
 from seo_geo_agent import deep_audit as seo_deep
@@ -816,6 +818,132 @@ def get_page_speed_page(brand_id: str, url: str, user=Depends(get_current_user))
     if not row:
         raise HTTPException(status_code=404, detail="That page has not been measured")
     return {"page": row}
+
+
+# --------------------------- rank tracker ---------------------------
+# The scheduled scoreboard: a 200-query pool swept every two hours, with
+# history, tracked-competitor positions, and a worklist. The sweep is a
+# background job - 200 sequential SERP calls take minutes - so POST starts it
+# and the panel polls GET for progress, exactly like the deep audit.
+
+def _rank_payload(brand: dict) -> dict:
+    brand_id = brand["id"]
+    pool = seo_rank.latest_pool(brand_id) or {"queries": [], "notes": [], "sources_used": []}
+    return {
+        "rows": seo_rank.latest_rows(brand_id),
+        "meta": seo_rank.latest_meta(brand_id),
+        "worklist": seo_rank.worklist(brand, limit=10),
+        "pool": {
+            "size": len([q for q in pool["queries"] if q.get("active")]),
+            "cap": seo_rank.MAX_POOL,
+            "built_at": pool.get("built_at"),
+            "sources_used": pool.get("sources_used", []),
+            "notes": pool.get("notes", []),
+        },
+        "budget": seo_rank.budget_status(brand_id),
+        "competitors": [d.lower() for d in (brand.get("competitors") or [])][:8],
+        "enabled": seo_rank.enabled(brand),
+        "job": seo_jobs.status(seo_rank.JOB_KIND, brand_id),
+    }
+
+
+@router.get("/seo-geo/rank-tracker/{brand_id}")
+def get_rank_tracker(brand_id: str, user=Depends(get_current_user)):
+    return _rank_payload(_brand_or_404(brand_id))
+
+
+@router.get("/seo-geo/rank-tracker/{brand_id}/history")
+def get_rank_history(brand_id: str, query: str, user=Depends(get_current_user)):
+    _brand_or_404(brand_id)
+    row = seo_rank.history_for(brand_id, query)
+    if not row:
+        raise HTTPException(status_code=404, detail="That query has no recorded history yet")
+    return {"history": row}
+
+
+@router.post("/seo-geo/rank-tracker/{brand_id}/sweep")
+def run_rank_sweep(brand_id: str, user=Depends(require_creator),
+                   act: Activity = trail.records("rank_sweep", "Started a rank sweep", unit=JOB)):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    if not seo_state.use_network():
+        raise HTTPException(status_code=503, detail="offline mode - set SEO_ALLOW_NETWORK=1")
+    act.note(f"Rank sweep for {brand['domain']}")
+    job = seo_jobs.start(seo_rank.JOB_KIND, brand_id,
+                         lambda progress: seo_rank.sweep(brand, progress))
+    return {"job": job}
+
+
+@router.post("/seo-geo/rank-tracker/{brand_id}/pool/rebuild")
+def rebuild_rank_pool(brand_id: str, user=Depends(require_creator),
+                      act: Activity = trail.records("rank_pool", "Rebuilt the rank-tracking pool")):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    pool = seo_rank.build_pool(brand, rows_fn=_rows_28d)
+    active = len([q for q in pool["queries"] if q.get("active")])
+    act.note(f"Pool rebuilt: {active} active queries from {', '.join(pool['sources_used']) or 'no source'}")
+    return _rank_payload(brand)
+
+
+@router.post("/seo-geo/rank-tracker/{brand_id}/gap")
+def rank_gap_card(brand_id: str, payload: QueryIn, user=Depends(get_current_user),
+                  act: Activity = trail.records("rank_gap", "Explained a ranking gap")):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    doc = seo_rank_gap.explain(brand, payload.query.strip())
+    if not doc:
+        raise HTTPException(status_code=404,
+                            detail="That query has not been swept, or nothing is ranking above us")
+    act.note(f"Gap for “{payload.query.strip()}” vs {doc['their_domain']}")
+    return {"gap": doc}
+
+
+@router.post("/seo-geo/rank-tracker/cron")
+def rank_cron(request: Request, response: Response,
+              act: Activity = trail.records("rank_cron", "Scheduled rank sweep",
+                                            unit=JOB, actor=CRON)):
+    """Two-hourly rank sweep across every enabled brand.
+
+    Separate from /seo-geo/cron/run on purpose: that one runs the full brand
+    report, which has no business running twelve times a day. Status contract is
+    the same, because Cloud Scheduler reads only the status code.
+    """
+    expected = os.environ.get("SEO_CRON_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="SEO_CRON_KEY not configured")
+    if not hmac.compare_digest(request.headers.get("x-cron-key", ""), expected):
+        raise HTTPException(status_code=403, detail="Bad cron key")
+
+    results: dict[str, dict] = {}
+    today = date.today().isoformat()
+    for brand in insights.list_brands():
+        if not brand.get("enabled", True):
+            continue
+        try:
+            pool = seo_rank.latest_pool(brand["id"]) or {}
+            # The pool is rebuilt once a day; sweeping twelve times against a
+            # pool that changes every run would make every trend line a lie.
+            if (pool.get("built_at") or "")[:10] != today:
+                seo_rank.build_pool(brand, rows_fn=_rows_28d)
+            results[brand["id"]] = {"ok": True, **seo_rank.sweep(brand)}
+        except Exception as exc:  # noqa: BLE001 — one bad brand must not kill the sweep
+            logger.exception("rank sweep failed for %s", brand["id"])
+            results[brand["id"]] = {"ok": False, "error": str(exc)}
+
+    ok = sum(1 for r in results.values() if r.get("ok"))
+    failed = len(results) - ok
+    out = {"brands": results, "ok": ok, "failed": failed, "status": "ok"}
+    if results and ok == 0:
+        out["status"] = "failed"
+        response.status_code = 502
+        logger.error("rank sweep FAILED: all %d brands errored", failed)
+    elif failed:
+        out["status"] = "partial"
+        response.status_code = 207
+        logger.warning("rank sweep degraded: %d/%d brands failed", failed, len(results))
+    act.note(f"Rank sweep across {len(results)} brands — {ok} ok, {failed} failed",
+             status=str(out["status"]))
+    return out
 
 
 # ------------------------------- cron -------------------------------
