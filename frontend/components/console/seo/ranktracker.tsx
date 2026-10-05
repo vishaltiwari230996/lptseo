@@ -7,18 +7,23 @@
  *  wants to look for themselves, and every row opens a drawer with its
  *  history and the gap card.
  *
- *  Two shapes bite if assumed instead of read:
+ *  Three shapes bite if assumed instead of read:
  *  - `RankDaily` ({best, worst, last}) is all-null on a day we ranked
  *    nowhere. The chart renders that as a break in the line, never as a
  *    point at position zero — zero would read as the best possible rank.
  *  - `RankGap["metrics"]` values are null when the page could not be read,
  *    distinct from a real 0. The gap card says so instead of printing "0".
+ *  - A history has TWO series, not one. `daily` only covers days older than
+ *    the raw retention window, so it is empty for the first week and a week
+ *    stale forever after; `raw` is the recent window, and the window Δ7d and
+ *    the dropout flag are actually computed over. The chart plots both.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isAbortError, RequestSequence,
   seoBuildBrief, seoRankGap, seoRankHistory, seoRankPoolRebuild, seoRankSweep, seoRankTracker,
-  type RankDaily, type RankGap, type RankHistory, type RankRow, type RankTrackerDoc,
+  type DeepJob, type RankDaily, type RankGap, type RankHistory, type RankPoint,
+  type RankRow, type RankSweepOutcome, type RankTrackerDoc,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
@@ -81,32 +86,73 @@ function yForPosition(pos: number): number {
   return CHART_PAD + frac * (CHART_H - 2 * CHART_PAD);
 }
 
-function HistoryChart({ daily }: { daily: [string, RankDaily][] }) {
-  if (!daily.length) return <div className="seo-empty">No history yet for this query.</div>;
+/** The ISO date an epoch-HOUR falls on, in UTC — the same calendar day the
+ *  backend's `_hours_to_date` buckets that hour into, so a `raw` point and a
+ *  `daily` entry for the same day carry the same label. */
+function dateOfHour(hour: number): string {
+  return new Date(hour * 3600_000).toISOString().slice(0, 10);
+}
 
-  const n = daily.length;
+/** One point on the chart's single timeline, whichever series it came from. */
+type ChartPoint = { at: number; date: string; pos: number | null; rolled: boolean };
+
+/** `daily` and `raw` are two resolutions of one history, not two histories.
+ *
+ *  The drawer used to plot `daily` alone. `_roll_series` only rolls points
+ *  older than the 7-day raw window, so `daily` is empty until day 8 and from
+ *  then on always ends a week in the past: the chart was blank for the first
+ *  week and permanently missing the most recent one — which is exactly the
+ *  window `delta_7d` and the dropout flag are computed over, and the week the
+ *  owner is actually watching. Both series go on one timeline, ordered by
+ *  time, with a marker where the resolution changes from one point a day to
+ *  one point a sweep. */
+function mergeSeries(raw: RankPoint[], daily: RankDaily[]): ChartPoint[] {
+  const points: ChartPoint[] = [
+    ...daily.map((d) => ({ at: d.at, date: d.d, pos: d.last, rolled: true })),
+    ...raw.map((p) => ({ at: p.h, date: dateOfHour(p.h), pos: p.p, rolled: false })),
+  ];
+  return points.sort((a, b) => a.at - b.at);
+}
+
+function HistoryChart({ raw, daily }: { raw: RankPoint[]; daily: RankDaily[] }) {
+  const points = mergeSeries(raw, daily);
+  if (!points.length) return <div className="seo-empty">No history yet for this query.</div>;
+
+  const n = points.length;
   const xFor = (i: number) => (n === 1 ? CHART_W / 2 : CHART_PAD + (i / (n - 1)) * (CHART_W - 2 * CHART_PAD));
 
   const segments: { x: number; y: number }[][] = [];
   const gaps: { x: number; date: string }[] = [];
   let current: { x: number; y: number }[] = [];
-  daily.forEach(([date, d], i) => {
+  points.forEach((p, i) => {
     const x = xFor(i);
-    // `last` null means we ranked nowhere that day — a break in the line,
-    // never a point plotted at the bottom as if that were rank zero.
-    if (d.last == null) {
+    // A null position means we ranked nowhere at that point — a break in the
+    // line, never a point plotted at the bottom as if that were rank zero.
+    if (p.pos == null) {
       if (current.length) { segments.push(current); current = []; }
-      gaps.push({ x, date });
+      gaps.push({ x, date: p.date });
       return;
     }
-    current.push({ x, y: yForPosition(d.last) });
+    current.push({ x, y: yForPosition(p.pos) });
   });
   if (current.length) segments.push(current);
+
+  // Where the daily history ends and the per-sweep window begins. Null when
+  // the chart is all one resolution (the first week, or a very old query).
+  const firstRawIndex = points.findIndex((p) => !p.rolled);
+  const boundaryX = firstRawIndex > 0 ? xFor(firstRawIndex) - 2 : null;
+
+  // One date can hold twelve raw points; name each not-ranking day once.
+  const gapDates = Array.from(new Set(gaps.map((g) => g.date)));
 
   return (
     <div>
       <svg className="seo-rank__chart" viewBox={`0 0 ${CHART_W} ${CHART_H}`} role="img"
            aria-label="Rank history over time, lower is better">
+        {boundaryX != null && (
+          <line className="seo-rank__chart-split" x1={boundaryX} x2={boundaryX}
+                y1={0} y2={CHART_H} />
+        )}
         {segments.map((seg, i) => (
           <polyline key={i} fill="none" stroke="var(--brand)" strokeWidth={2}
                     points={seg.map((p) => `${p.x},${p.y}`).join(" ")} />
@@ -118,13 +164,78 @@ function HistoryChart({ daily }: { daily: [string, RankDaily][] }) {
           <circle key={i} cx={g.x} cy={CHART_H - CHART_PAD} r={3} className="seo-rank__chart-gap" />
         ))}
       </svg>
-      {gaps.length > 0 && (
+      {boundaryX != null && (
         <div className="seo-rank__chart-note">
-          Not ranking on: {gaps.map((g) => g.date).join(", ")}
+          Daily to {points[firstRawIndex - 1].date}, then every sweep.
+        </div>
+      )}
+      {gapDates.length > 0 && (
+        <div className="seo-rank__chart-note">
+          Not ranking on: {gapDates.join(", ")}
         </div>
       )}
     </div>
   );
+}
+
+/* ------------------------------- job / sweep ------------------------------ */
+
+/** A sweep that failed, or that a server restart killed, must say so.
+ *
+ *  This panel only ever branched on `status === "running"`, so `job.error`,
+ *  `"failed"` and `"interrupted"` were typed and never rendered: a sweep that
+ *  died — which is precisely what the Firestore encoding bug made every sweep
+ *  do — showed as nothing at all. Spec §10 says this panel polls exactly as
+ *  the deep audit and page-speed panels do; this is `deep.tsx`'s `JobBar`
+ *  failure branch, same two states, same wording shape. */
+function JobFailure({ job }: { job: DeepJob | null }) {
+  if (!job || job.status === "running" || job.status === "done") return null;
+  if (job.status === "failed") {
+    return (
+      <div className="seo-degraded">
+        <Icon name="alert-triangle" size={14} />
+        <div>The last sweep failed{job.error ? `: ${job.error}` : "."} Nothing was written —
+          the rankings below are from the sweep before it.</div>
+      </div>
+    );
+  }
+  if (job.status === "interrupted") {
+    return (
+      <div className="seo-degraded">
+        <Icon name="alert-triangle" size={14} />
+        <div>The last sweep was interrupted by a server restart at “{job.phase}”. Start it
+          again — the queries it already checked are not re-charged until the next sweep.</div>
+      </div>
+    );
+  }
+  return null;
+}
+
+/** Why "Run now" is unavailable, when it is. */
+const BLOCKED_REASON: Record<string, string> = {
+  disabled: "Rank tracking is switched off for this brand, so the schedule does nothing.",
+  credentials: "No Serper API key is configured, so the sweep cannot reach live SERPs.",
+  running: "Another sweep for this brand is already running.",
+};
+
+/** A sweep that was refused wrote nothing and still reported its job as done,
+ *  so the panel said "all clear" with "Run now" still enabled. `blocked` and
+ *  `notes` were in the payload the whole time and read by nobody. */
+function SweepOutcome({ last, enabled }: { last: RankSweepOutcome | null; enabled: boolean }) {
+  // `enabled` is authoritative and current; `last_sweep` is a record of what
+  // happened, which may predate the switch being flipped either way. When the
+  // brand is switched off right now, that is the whole story — the backend's
+  // note for the same state only restates it in different words.
+  if (!enabled) return <NoteList notes={[BLOCKED_REASON.disabled]} />;
+
+  const reason = last?.blocked ? BLOCKED_REASON[last.blocked] : undefined;
+  // A recognised refusal gets this panel's own wording and nothing else: its
+  // notes say the same thing. Everything else — the budget stop, a total
+  // outage — gets the backend's notes verbatim, because those carry counts
+  // this panel cannot reconstruct.
+  const lines = reason ? [reason] : (last?.notes ?? []);
+  if (!lines.length) return null;
+  return <NoteList notes={lines} />;
 }
 
 /* --------------------------------- gap card -------------------------------- */
@@ -321,6 +432,17 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
 
   const running = doc?.job?.status === "running";
   const budgetExhausted = doc?.budget.remaining === 0;
+  // `enabled` was in the payload and read by nobody: a brand with rank
+  // tracking switched off kept an enabled "Run now" that toasted "Sweep
+  // started" over a sweep which wrote nothing and reported its job as done.
+  //
+  // Deliberately NOT also gated on `last_sweep.blocked`. `enabled` is
+  // recomputed on every request and so is always current, while `last_sweep`
+  // is a record of the past: disabling the button because the LAST sweep
+  // lacked an API key would leave no way to run the first sweep after the key
+  // was added — the button that clears the condition, disabled by the
+  // condition. The reason is shown instead, by SweepOutcome above.
+  const cannotSweep = doc != null && !doc.enabled;
 
   return (
     <div className="seo-stack">
@@ -353,7 +475,8 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
             </div>
             {isCreator && (
               <div className="seo-rank__head-actions">
-                <button className="seo-btn seo-btn--primary" disabled={running || sweepBusy || budgetExhausted}
+                <button className="seo-btn seo-btn--primary"
+                        disabled={running || sweepBusy || budgetExhausted || cannotSweep}
                         onClick={() => void runSweep()}>
                   <Icon name="refresh-cw" size={13} /> Run now
                 </button>
@@ -375,6 +498,8 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
             </div>
           )}
 
+          <JobFailure job={doc.job} />
+          <SweepOutcome last={doc.last_sweep} enabled={doc.enabled} />
           <NoteList notes={doc.pool.notes} />
 
           <div className="seo-rank__worklist">
@@ -480,7 +605,7 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                 <div>{historyError}</div>
               </div>
             )}
-            {history && <HistoryChart daily={history.daily} />}
+            {history && <HistoryChart raw={history.raw} daily={history.daily} />}
 
             {!!openRow?.top.length && (
               <div>

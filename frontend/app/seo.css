@@ -821,6 +821,9 @@ a.seo-pages__path:hover { color: var(--green-500); }
 
 .seo-rank__chart { width: 100%; height: auto; }
 .seo-rank__chart-gap { fill: var(--text-tertiary); }
+/* Where the chart changes resolution: one point a day to the left, one
+   point a sweep to the right. */
+.seo-rank__chart-split { stroke: var(--border); stroke-width: 1; stroke-dasharray: 3 3; }
 .seo-rank__chart-note { font: 500 12px/1.5 var(--font-sans); color: var(--text-tertiary); margin-top: 4px; }
 
 .seo-rank__top-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font: 450 12.5px/1.5 var(--font-sans); }

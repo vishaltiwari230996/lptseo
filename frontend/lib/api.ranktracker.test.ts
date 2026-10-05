@@ -40,12 +40,15 @@ describe("rank tracker client", () => {
     expect(doc.pool.cap).toBe(200);
   });
 
-  it("url-encodes the query when reading history, and the daily triple carries `at`", async () => {
+  it("url-encodes the query when reading history, and the daily point carries `d` and `at`", async () => {
     const fetchMock = stub({
       history: {
         query: "clat & cuet",
-        raw: [],
-        daily: [["2026-10-01", { best: 4, worst: 9, last: 4, at: 123456 }]],
+        // Maps, not [date, triple] / [hour, position] pairs. Firestore
+        // rejects an array whose elements are arrays, so the tuple encoding
+        // could not be stored at all — see the C1 note on `RankPoint`.
+        raw: [{ h: 480000, p: 7 }],
+        daily: [{ d: "2026-10-01", best: 4, worst: 9, last: 4, at: 123456 }],
         rivals: {},
       },
     });
@@ -54,15 +57,17 @@ describe("rank tracker client", () => {
     const result = await seoRankHistory("b1", "clat & cuet");
 
     expect(fetchMock.mock.calls[0][0]).toContain("query=clat%20%26%20cuet");
-    expect(result.history.daily[0][1].at).toBe(123456);
+    expect(result.history.daily[0].d).toBe("2026-10-01");
+    expect(result.history.daily[0].at).toBe(123456);
+    expect(result.history.raw[0]).toEqual({ h: 480000, p: 7 });
   });
 
-  it("allows a null daily triple for a day we ranked nowhere", async () => {
+  it("allows a null daily triple, and a null raw point, for a day we ranked nowhere", async () => {
     stub({
       history: {
         query: "q",
-        raw: [],
-        daily: [["2026-10-02", { best: null, worst: null, last: null, at: 123480 }]],
+        raw: [{ h: 123490, p: null }],
+        daily: [{ d: "2026-10-02", best: null, worst: null, last: null, at: 123480 }],
         rivals: {},
       },
     });
@@ -70,10 +75,13 @@ describe("rank tracker client", () => {
     const { seoRankHistory } = await import("./api");
     const result = await seoRankHistory("b1", "q");
 
-    const [, triple] = result.history.daily[0];
+    const triple = result.history.daily[0];
     expect(triple.best).toBeNull();
     expect(triple.worst).toBeNull();
     expect(triple.last).toBeNull();
+    // Null is "ranked nowhere", and must survive the type as null rather
+    // than being modelled as a number that would read as rank 0.
+    expect(result.history.raw[0].p).toBeNull();
   });
 
   it("posts the query in the body to the brand-scoped gap endpoint", async () => {

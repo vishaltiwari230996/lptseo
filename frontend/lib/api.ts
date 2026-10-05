@@ -3062,6 +3062,21 @@ export interface RankMeta {
   count: number;
 }
 
+/** Why the most recent sweep did nothing, when it did nothing. `job` only
+ *  reports that the background thread finished; a sweep that was switched
+ *  off, had no API key, or found another run already in progress finishes
+ *  cleanly having written nothing at all. */
+export interface RankSweepOutcome {
+  checked: number;
+  ranked: number;
+  errors: number;
+  /** null = the sweep ran to completion. "budget" = it stopped part-way. The
+   *  other three mean it did not start and charged nothing. */
+  blocked: "disabled" | "credentials" | "running" | "budget" | null;
+  at: string;
+  notes: string[];
+}
+
 export interface RankTrackerDoc {
   rows: RankRow[];
   meta: RankMeta | null;
@@ -3071,12 +3086,29 @@ export interface RankTrackerDoc {
   competitors: string[];
   enabled: boolean;
   job: DeepJob | null;
+  /** null before any sweep has ever run — distinct from a sweep that ran and
+   *  reported nothing blocked. */
+  last_sweep: RankSweepOutcome | null;
 }
 
-/** One day's rolled-up triple. A day we ranked nowhere records `best`,
- *  `worst` and `last` as null; `at` is the epoch-hour of the day's final
- *  point and is always present. */
+/** One raw rank observation. `h` is the epoch HOUR (not seconds); `p` is the
+ *  position, or null for a sweep in which we ranked nowhere.
+ *
+ *  A map, not a `[h, p]` pair, and that is load-bearing rather than
+ *  stylistic: Firestore rejects an array whose elements are themselves
+ *  arrays, so the tuple encoding could not be stored at all. */
+export interface RankPoint {
+  h: number;
+  p: number | null;
+}
+
+/** One day's rolled-up triple, for days older than the raw retention window.
+ *  `d` is the ISO date. A day we ranked nowhere records `best`, `worst` and
+ *  `last` as null; `at` is the epoch-hour of the day's final point and is
+ *  always present. Same nested-array constraint as `RankPoint` — this used to
+ *  be `[date, {...}]`. */
 export interface RankDaily {
+  d: string;
   best: number | null;
   worst: number | null;
   last: number | null;
@@ -3085,9 +3117,13 @@ export interface RankDaily {
 
 export interface RankHistory {
   query: string;
-  raw: [number, number | null][];
-  daily: [string, RankDaily][];
-  rivals: Record<string, { raw: [number, number | null][]; daily: [string, RankDaily][] }>;
+  /** The recent window, one point per sweep. This is the window `delta_7d`
+   *  and the dropout flag are computed over, so it is the part the chart must
+   *  show — `daily` is empty for the tracker's first week and a week stale
+   *  thereafter. */
+  raw: RankPoint[];
+  daily: RankDaily[];
+  rivals: Record<string, { raw: RankPoint[]; daily: RankDaily[] }>;
 }
 
 export interface RankGap {

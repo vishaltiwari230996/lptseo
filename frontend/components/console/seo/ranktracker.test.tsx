@@ -42,6 +42,10 @@ vi.mock("@/lib/api", async () => {
   };
 });
 
+/** 2026-10-02 09:00 UTC as an epoch HOUR — the unit `RankPoint.h` and
+ *  `RankDaily.at` both use (seconds // 3600), not seconds. */
+const HOUR_2026_10_02_09 = Math.floor(Date.UTC(2026, 9, 2, 9) / 3600_000);
+
 afterEach(cleanup);
 
 function doc(over: Partial<RankTrackerDoc> = {}): RankTrackerDoc {
@@ -76,7 +80,7 @@ function doc(over: Partial<RankTrackerDoc> = {}): RankTrackerDoc {
     pool: { size: 3, cap: 200, built_at: "2026-10-05T06:00:00+00:00",
             sources_used: ["custom", "gsc"], notes: [] },
     budget: { date: "2026-10-05", searches: 36, cap: 3000, remaining: 2964 },
-    competitors: ["rival.com"], enabled: true, job: null,
+    competitors: ["rival.com"], enabled: true, job: null, last_sweep: null,
     ...over,
   };
 }
@@ -133,11 +137,19 @@ describe("RankTrackerView", () => {
     seoRankTracker.mockResolvedValue(doc());
     const history: RankHistory = {
       query: "clat coaching",
-      raw: [],
+      // A real history always has BOTH series — `daily` for days past the
+      // 7-day raw window, `raw` for the days inside it. The earlier version
+      // of this test seeded `daily` alone with `raw: []`, a state the
+      // backend never produces, and so could not have caught the drawer
+      // plotting only one of the two.
+      raw: [
+        { h: HOUR_2026_10_02_09, p: 5 },
+        { h: HOUR_2026_10_02_09 + 2, p: 4 },
+      ],
       daily: [
-        ["2026-09-29", { best: 6, worst: 9, last: 8, at: 1759190400 }],
-        ["2026-09-30", { best: null, worst: null, last: null, at: 1759276800 }],
-        ["2026-10-01", { best: 5, worst: 7, last: 5, at: 1759363200 }],
+        { d: "2026-09-29", best: 6, worst: 9, last: 8, at: 1759190400 / 3600 },
+        { d: "2026-09-30", best: null, worst: null, last: null, at: 1759276800 / 3600 },
+        { d: "2026-10-01", best: 5, worst: 7, last: 5, at: 1759363200 / 3600 },
       ],
       rivals: {},
     };
@@ -218,7 +230,7 @@ describe("RankTrackerView", () => {
     resolveSlow({
       history: {
         query: "clat coaching", raw: [],
-        daily: [["2026-09-01", { best: 1, worst: 1, last: 1, at: 1 }]], rivals: {},
+        daily: [{ d: "2026-09-01", best: 1, worst: 1, last: 1, at: 1 }], rivals: {},
       },
     });
     // ...and must be discarded: still "clat fees", still the empty state —
@@ -336,5 +348,147 @@ describe("RankTrackerView", () => {
     const headers = screen.getAllByRole("columnheader");
     expect(headers.length).toBeGreaterThan(0);
     headers.forEach((h) => expect(h).toHaveAttribute("scope", "col"));
+  });
+  // === Final whole-branch review fixes ==================================== //
+
+  // I3 (Important): `_roll_series` only rolls points older than 7 days, so
+  // `daily` is empty until day 8 and from then on always ends a week in the
+  // past. The drawer plotted `daily` alone, so the chart was blank for the
+  // first week and permanently missing the most recent one — the window
+  // delta_7d and the dropout flag are actually computed over.
+  it("plots the recent raw window, not only the week-stale daily series", async () => {
+    seoRankTracker.mockResolvedValue(doc());
+    const history: RankHistory = {
+      query: "clat coaching",
+      raw: [
+        { h: HOUR_2026_10_02_09, p: 11 },
+        { h: HOUR_2026_10_02_09 + 2, p: null },   // fell out this morning
+      ],
+      daily: [],                                   // week one: nothing rolled yet
+      rivals: {},
+    };
+    seoRankHistory.mockResolvedValue({ history });
+
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "clat coaching" }));
+
+    // There IS a chart — the drawer used to show "No history yet" here, for
+    // every query, for the tracker's entire first week.
+    await waitFor(() => expect(screen.getByRole("img", { name: /rank history/i })).toBeInTheDocument());
+    expect(screen.queryByText(/no history yet/i)).not.toBeInTheDocument();
+    // And the raw dropout is drawn as a gap, not as a point at rank zero.
+    expect(screen.getByText(/not ranking on:/i)).toHaveTextContent("2026-10-02");
+  });
+
+  it("joins the daily and raw series onto one timeline", async () => {
+    seoRankTracker.mockResolvedValue(doc());
+    const history: RankHistory = {
+      query: "clat coaching",
+      raw: [{ h: HOUR_2026_10_02_09, p: 4 }],
+      daily: [{ d: "2026-09-29", best: 6, worst: 9, last: 8, at: 1759190400 / 3600 }],
+      rivals: {},
+    };
+    seoRankHistory.mockResolvedValue({ history });
+
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "clat coaching" }));
+
+    const chart = await screen.findByRole("img", { name: /rank history/i });
+    // Two points from two series, one polyline through both.
+    expect(chart.querySelectorAll("circle")).toHaveLength(2);
+    // And the resolution change is named rather than left for the reader to
+    // infer from a line that suddenly gets denser.
+    expect(screen.getByText(/daily to 2026-09-29, then every sweep/i)).toBeInTheDocument();
+  });
+
+  // I2 (Important): the panel only ever branched on status === "running", so
+  // `job.error`, "failed" and "interrupted" were typed and never rendered.
+  // A sweep that died showed as nothing at all — which is what would have
+  // hidden the Firestore encoding bug from the owner indefinitely.
+  it("reports a failed sweep with its error instead of showing nothing", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      job: { kind: "rank-sweep", brand_id: "b1", status: "failed", phase: "failed",
+             done: 12, total: 200, started_at: "", finished_at: "",
+             error: "InvalidArgument: 400 Property array contains an invalid nested entity.",
+             log: [], alive: false },
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(/last sweep failed/i)).toBeInTheDocument());
+    expect(screen.getByText(/invalid nested entity/i)).toBeInTheDocument();
+  });
+
+  it("reports a sweep interrupted by a server restart", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      job: { kind: "rank-sweep", brand_id: "b1", status: "interrupted",
+             phase: "checking 200 queries", done: 61, total: 200, started_at: "",
+             finished_at: null, error: null, log: [], alive: false },
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(/interrupted by a server restart/i)).toBeInTheDocument());
+    expect(screen.getByText(/checking 200 queries/i)).toBeInTheDocument();
+  });
+
+  // I4 (Important): sweep() returns blocked: "disabled" | "credentials" and
+  // writes nothing; jobs.start then marks the job done. "Run now" stayed
+  // enabled and toasted "Sweep started" over a tracker doing nothing at all.
+  it("disables Run now and says why when rank tracking is switched off", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      enabled: false,
+      last_sweep: { checked: 0, ranked: 0, errors: 0, blocked: "disabled",
+                    at: "2026-10-05T09:00:00+00:00",
+                    notes: ["Rank tracking is switched off for this brand"] },
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled());
+    expect(screen.getByText(/switched off for this brand/i)).toBeInTheDocument();
+  });
+
+  it("explains a key-less sweep without disabling the button that fixes it", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      last_sweep: { checked: 0, ranked: 0, errors: 0, blocked: "credentials",
+                    at: "2026-10-05T09:00:00+00:00",
+                    notes: ["SEO_SERPER_API_KEY not set — rank tracking needs live SERPs"] },
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(/no serper api key/i)).toBeInTheDocument());
+    // `last_sweep` is a record of the PAST. Disabling Run now on it would
+    // leave no way to run the first sweep after the key was added.
+    expect(screen.getByRole("button", { name: /run now/i })).not.toBeDisabled();
+  });
+
+  // I1 (Important): an all-errored sweep no longer overwrites rank-latest,
+  // so the panel keeps showing the previous real rankings — which makes it
+  // all the more important that it says the last sweep failed.
+  it("surfaces a total outage rather than rendering the stale table as all clear", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      last_sweep: { checked: 200, ranked: 0, errors: 200, blocked: null,
+                    at: "2026-10-05T09:00:00+00:00",
+                    notes: ["Every one of the 200 queries checked failed — keeping the previous results rather than overwriting them"] },
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(/200 queries checked failed/i)).toBeInTheDocument());
+  });
+
+  it("says nothing extra when the last sweep ran cleanly", async () => {
+    seoRankTracker.mockResolvedValue(doc({
+      last_sweep: { checked: 200, ranked: 200, errors: 0, blocked: null,
+                    at: "2026-10-05T09:00:00+00:00", notes: [] },
+      job: { kind: "rank-sweep", brand_id: "b1", status: "done", phase: "done",
+             done: 200, total: 200, started_at: "", finished_at: "",
+             error: null, log: [], alive: false },
+    }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    expect(screen.queryByText(/last sweep failed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/switched off/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run now/i })).not.toBeDisabled();
   });
 });
