@@ -709,3 +709,159 @@ def test_worklist_respects_the_limit():
         for n in range(30)
     ])
     assert len(rt.worklist(_brand(), limit=5)) == 5
+
+
+# === Comprehensive boundary and edge-case tests ===
+
+def test_position_band_boundary_3_vs_4_and_20_vs_21():
+    """Position band thresholds are inclusive/exclusive as documented."""
+    assert rt._position_band(3) == 0.2       # < 4 is won
+    assert rt._position_band(4) == 1.0       # >= 4 is striking distance
+    assert rt._position_band(20) == 1.0      # <= 20 is striking distance
+    assert rt._position_band(21) == 0.5      # > 20 is fading
+
+
+def test_position_band_boundary_40_vs_41():
+    """Position band thresholds at the 40-boundary."""
+    assert rt._position_band(40) == 0.5      # <= 40 is mid-tier
+    assert rt._position_band(41) == 0.1      # > 40 is nearly impossible
+
+
+def test_delta_on_empty_history():
+    """delta returns None when history row is missing."""
+    assert rt.delta("b1", "never seen", hours=168) is None
+
+
+def test_delta_on_single_point():
+    """delta returns None when there is only one ranked point."""
+    rt.append_history("b1", [_result("single", 5)], [], now=_at(5))
+    assert rt.delta("b1", "single", hours=168) is None
+
+
+def test_delta_on_all_none_positions():
+    """delta returns None when all points are unranked (None)."""
+    rt.append_history("b1", [_result("all none", None)], [], now=_at(1))
+    rt.append_history("b1", [_result("all none", None)], [], now=_at(5))
+    assert rt.delta("b1", "all none", hours=168) is None
+
+
+def test_delta_latest_point_is_none_returns_none():
+    """delta returns None when current position is unranked, even if history exists."""
+    rt.append_history("b1", [_result("dropout", 8)], [], now=_at(1))
+    rt.append_history("b1", [_result("dropout", None)], [], now=_at(5))
+    assert rt.delta("b1", "dropout", hours=168) is None
+
+
+def test_delta_series_entirely_within_window():
+    """delta compares against the earliest point when series is younger than window."""
+    rt.append_history("b1", [_result("young", 10)], [], now=_at(5, 9))
+    rt.append_history("b1", [_result("young", 7)], [], now=_at(5, 11))
+    # Both points are within the 168-hour window; compare against the first.
+    assert rt.delta("b1", "young", hours=168) == 3  # 10 - 7
+
+
+def test_delta_series_spanning_cutoff_uses_cutoff_point():
+    """delta uses the most recent point at or before the cutoff."""
+    rt.append_history("b1", [_result("old", 10)], [], now=_at(1, 9))     # day 1 at 9am
+    rt.append_history("b1", [_result("old", 8)], [], now=_at(5, 9))      # day 5 at 9am
+    rt.append_history("b1", [_result("old", 6)], [], now=_at(8, 12))     # day 8 at noon
+    # Window is 7 days (168 hours). Latest is day 8 12:00, cutoff is day 1 12:00.
+    # Point at day 1 9:00 is before cutoff (1 9:00 < 1 12:00), so it's the baseline.
+    # Point at day 5 9:00 is after cutoff, so skip it.
+    # delta = 10 - 6 = 4 (we improved by 4 positions).
+    assert rt.delta("b1", "old", hours=7 * 24) == 4
+
+
+def test_lost_ranking_on_current_dropout():
+    """lost_ranking is true when latest point is None and we were ranked in window."""
+    rt.append_history("b1", [_result("dropped", 8)], [], now=_at(1))
+    rt.append_history("b1", [_result("dropped", None)], [], now=_at(5))
+    assert rt.lost_ranking("b1", "dropped", hours=168) is True
+
+
+def test_lost_ranking_on_no_dropout():
+    """lost_ranking is false when currently ranked."""
+    rt.append_history("b1", [_result("stable", 8)], [], now=_at(1))
+    rt.append_history("b1", [_result("stable", 7)], [], now=_at(5))
+    assert rt.lost_ranking("b1", "stable", hours=168) is False
+
+
+def test_lost_ranking_outside_window():
+    """lost_ranking is false when ranked point is outside the window."""
+    rt.append_history("b1", [_result("outside", 8)], [], now=_at(1))  # 7+ days ago
+    rt.append_history("b1", [_result("outside", None)], [], now=_at(8, 12))  # just now
+    # Window is 168 hours (7 days). Point at day 1 is older than cutoff (day 8 - 7 = day 1, 00:00).
+    # At day 8 12:00, cutoff is day 1 12:00. Point at day 1 is before cutoff, so outside window.
+    assert rt.lost_ranking("b1", "outside", hours=168) is False
+
+
+def test_worklist_handles_dropout_with_band_1_0_and_trend_1_6(monkeypatch):
+    """A query dropped from results gets band=1.0 (striking distance) and trend=1.6 multiplier."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("dropped", 5000)), []))
+
+    # Seed latest: query is now unranked (position: None) but has no competitor above it yet.
+    # We need to set it up so it has a leader via some top entry.
+    _seed_latest([
+        {"query": "dropped", "position": None, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+    ])
+
+    # History: ranked at 8, then dropped to None.
+    rt.append_history("b1", [_result("dropped", 8)], [], now=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    rt.append_history("b1", [_result("dropped", None)], [], now=datetime(2026, 10, 5, tzinfo=timezone.utc))
+
+    rows = rt.worklist(_brand())
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["query"] == "dropped"
+    assert row["delta_7d"] is None  # No numeric delta
+    assert row["reason"] == "dropped out of the results this week; 5,000 impressions/28d; a tracked competitor is above us"
+    # Score should use band=1.0 and trend=1.6.
+    # demand = log1p(5000) ≈ 8.517, gap = 1.4 (tracked), band = 1.0, trend = 1.6
+    # expected ≈ 8.517 * 1.0 * 1.4 * 1.6 ≈ 19.07
+    assert row["score"] > 19.0
+
+
+def test_worklist_already_won_absent_from_list(monkeypatch):
+    """Queries we already rank for (#1) are completely absent from the worklist, not just ranked low."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("winnable", 5000), ("already won", 9000)), []))
+    _seed_latest([
+        {"query": "winnable", "position": 8, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "https://rival.com/a", "title": ""}]},
+        {"query": "already won", "position": 1, "url": "", "error": None, "top": []},
+    ])
+
+    rows = rt.worklist(_brand())
+
+    all_queries = [r["query"] for r in rows]
+    assert "already won" not in all_queries
+
+
+def test_demand_curve_is_monotonic(monkeypatch):
+    """Verify that log-based demand is monotonically non-decreasing."""
+    # The formula max(1.0, log1p(shown)) ensures demand(0)=1.0, demand(n) >= 1.0.
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+
+    # Set up two queries: one with 1 impression, one with 5.
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("one imp", 1), ("five imp", 5)), []))
+    _seed_latest([
+        {"query": "one imp", "position": 10, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+        {"query": "five imp", "position": 10, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+    ])
+
+    rows = rt.worklist(_brand())
+
+    # Same position, same rivals → scores differ only by demand.
+    scores = {r["query"]: r["score"] for r in rows}
+    assert scores["five imp"] >= scores["one imp"]

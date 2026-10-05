@@ -478,6 +478,28 @@ def _position_band(position: int | None) -> float:
     return 0.1
 
 
+def _delta_from(history_row: dict, hours: int) -> int | None:
+    """Positions gained since ``hours`` ago from a history row dict.
+
+    Negative = we fell. None = no numeric basis (e.g., we are not currently ranked,
+    or the series lacks two ranked points).
+    """
+    if not history_row or not history_row.get("raw"):
+        return None
+    raw = history_row["raw"]
+    if not raw or raw[-1][1] is None:
+        # Current position is unranked; no numeric delta to report.
+        return None
+    now_point = raw[-1]
+    ranked_points = [p for p in raw if p[1] is not None]
+    if len(ranked_points) < 2:
+        return None
+    cutoff = now_point[0] - hours
+    older = [p for p in ranked_points[:-1] if p[0] <= cutoff]
+    baseline = older[-1] if older else ranked_points[0]
+    return baseline[1] - now_point[1]
+
+
 def delta(brand_id: str, query: str, hours: int) -> int | None:
     """Positions gained since ``hours`` ago. Negative = we fell. None = no basis.
 
@@ -487,16 +509,24 @@ def delta(brand_id: str, query: str, hours: int) -> int | None:
     tracker's first week — exactly when the owner is watching hardest.
     """
     row = history_for(brand_id, query)
+    return _delta_from(row, hours)
+
+
+def lost_ranking(brand_id: str, query: str, hours: int) -> bool:
+    """True when the latest point is unranked and we were ranked within the window.
+
+    This signals a dropout — a query we demonstrably ranked for and have now lost.
+    """
+    row = history_for(brand_id, query)
     if not row or not row.get("raw"):
-        return None
-    points = [p for p in row["raw"] if p[1] is not None]
-    if len(points) < 2 or points[-1][1] is None:
-        return None
-    now_point = points[-1]
-    cutoff = now_point[0] - hours
-    older = [p for p in points[:-1] if p[0] <= cutoff]
-    baseline = older[-1] if older else points[0]
-    return baseline[1] - now_point[1]
+        return False
+    raw = row["raw"]
+    if not raw or raw[-1][1] is not None:
+        # Either no history or currently ranked; no dropout.
+        return False
+    # Latest is unranked. Check if we were ranked somewhere in the window.
+    cutoff = raw[-1][0] - hours
+    return any(p[0] >= cutoff and p[1] is not None for p in raw[:-1])
 
 
 def worklist(brand: dict, limit: int = 10) -> list[dict]:
@@ -511,6 +541,9 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
                    for q in (latest_pool(brand_id) or {}).get("queries", [])}
     rivals = {d.lower() for d in (brand.get("competitors") or [])}
 
+    # Load history once to avoid 200 redundant read()/load_list calls in the loop.
+    history_by_query = {_norm(h["query"]): h for h in all_history(brand_id)}
+
     rows: list[dict] = []
     for result in latest_rows(brand_id):
         if result.get("error"):
@@ -522,15 +555,29 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
         if not leader:
             continue  # nobody is beating us here
 
-        shown = impressions.get(_norm(result["query"]), 0)
-        demand = math.log1p(shown) if shown else 1.0
-        band = _position_band(position)
+        query_key = _norm(result["query"])
+        shown = impressions.get(query_key, 0)
+        demand = max(1.0, math.log1p(shown))
         tracked = leader["domain"] in rivals
         # A rival we already profile is a gap we can actually analyse.
         gap = 1.4 if tracked else 1.0
-        moved = delta(brand_id, result["query"], hours=7 * 24)
+
+        # Compute delta and dropout detection from loaded history.
+        history_row = history_by_query.get(query_key)
+        moved = _delta_from(history_row, hours=7 * 24)
+        dropped = lost_ranking(brand_id, result["query"], hours=7 * 24)
+
         # A live regression outranks a long-standing weakness.
-        trend = 1.6 if (moved is not None and moved < 0) else 1.0
+        # A dropout is also high-priority (band=1.0, trend=1.6).
+        if moved is not None and moved < 0:
+            band = _position_band(position)
+            trend = 1.6
+        elif dropped:
+            band = 1.0  # Dropout is striking-distance winnable.
+            trend = 1.6
+        else:
+            band = _position_band(position)
+            trend = 1.0
 
         rows.append({
             "query": result["query"],
@@ -542,17 +589,20 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
             "tracked_rival": tracked,
             "delta_7d": moved,
             "score": round(demand * band * gap * trend, 3),
-            "reason": _reason(position, shown, tracked, moved),
+            "reason": _reason(position, shown, tracked, moved, dropped),
         })
 
     rows.sort(key=lambda r: -r["score"])
     return rows[:limit]
 
 
-def _reason(position, impressions, tracked, moved) -> str:
+def _reason(position, impressions, tracked, moved, dropped=False) -> str:
     bits = []
     if position is None:
-        bits.append("not ranking")
+        if dropped:
+            bits.append("dropped out of the results this week")
+        else:
+            bits.append("not ranking")
     elif STRIKING_LOW <= position <= STRIKING_HIGH:
         bits.append(f"#{position} — striking distance")
     else:
