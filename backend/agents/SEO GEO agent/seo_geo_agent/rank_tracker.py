@@ -135,13 +135,22 @@ def build_pool(brand: dict, rows_fn=None) -> dict:
     notes: list[str] = []
     sources_used: list[str] = []
     candidates: list[tuple[str, str, int]] = []  # (query, source, impressions)
+    max_impressions: dict[str, int] = {}  # track max impressions per normalized key
 
     for q in competitors.list_custom_queries(brand["id"]):
         candidates.append((q, "custom", 0))
+        key = _norm(q)
+        if key:
+            max_impressions[key] = max(max_impressions.get(key, 0), 0)
     if candidates:
         sources_used.append("custom")
 
-    rows, gsc_notes = rows_fn(brand) if rows_fn else ([], [])
+    rows, gsc_notes = [], []
+    if rows_fn:
+        try:
+            rows, gsc_notes = rows_fn(brand)
+        except Exception as exc:  # noqa: BLE001 — Search Console is optional here
+            gsc_notes = [f"Search Console: {exc}"]
     notes.extend(gsc_notes)
     if rows:
         totals: dict[str, tuple[str, int]] = {}
@@ -153,17 +162,26 @@ def build_pool(brand: dict, rows_fn=None) -> dict:
         for label, impressions in ranked:
             if impressions >= MIN_GSC_IMPRESSIONS:
                 candidates.append((label, "gsc", impressions))
+                key = _norm(label)
+                if key:
+                    max_impressions[key] = max(max_impressions.get(key, 0), impressions)
         sources_used.append("gsc")
 
     harvested = _harvest_ranked(brand["id"])
     for q in harvested:
         candidates.append((q, "harvest", 0))
+        key = _norm(q)
+        if key:
+            max_impressions[key] = max(max_impressions.get(key, 0), 0)
     if harvested:
         sources_used.append("harvest")
 
     seeds = competitors.tracked_keywords(brand)
     for q in seeds:
         candidates.append((q, "seed", 0))
+        key = _norm(q)
+        if key:
+            max_impressions[key] = max(max_impressions.get(key, 0), 0)
     if seeds:
         sources_used.append("seed")
 
@@ -180,7 +198,7 @@ def build_pool(brand: dict, rows_fn=None) -> dict:
         chosen[key] = {
             "query": label.strip(),
             "source": source,
-            "impressions": impressions,
+            "impressions": max_impressions.get(key, impressions),
             "added_at": previous.get(key, {}).get("added_at", stamp),
             "active": True,
         }

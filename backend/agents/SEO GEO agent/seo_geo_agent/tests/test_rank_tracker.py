@@ -161,3 +161,34 @@ def test_rebuild_marks_dropped_queries_inactive_instead_of_deleting_them(monkeyp
     assert by_query["going away"]["active"] is False
     assert by_query["still here"]["active"] is True
     assert rt.active_queries("b1") == ["still here"]
+
+
+def test_pool_degrades_gracefully_when_rows_fn_raises(monkeypatch):
+    """A failing rows_fn records a note and continues with other sources."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["custom only"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: ["seed only"])
+    rt.record_harvest("b1", ["harvest only"])
+
+    def failing_rows_fn(brand):
+        raise RuntimeError("Network timeout")
+
+    doc = rt.build_pool(_brand(), rows_fn=failing_rows_fn)
+
+    assert [q["query"] for q in doc["queries"]] == ["custom only", "harvest only", "seed only"]
+    assert any("Search Console" in n and "Network timeout" in n for n in doc["notes"])
+    assert "gsc" not in doc["sources_used"]
+
+
+def test_pool_takes_max_impressions_when_query_appears_in_multiple_sources(monkeypatch):
+    """Earlier source wins identity, but maximum impressions survives."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    gsc = _rows(("CLAT Coaching", 777))
+
+    doc = rt.build_pool(_brand(), rows_fn=lambda b: (gsc, []))
+
+    assert len(doc["queries"]) == 1
+    assert doc["queries"][0]["source"] == "custom"
+    assert doc["queries"][0]["impressions"] == 777
