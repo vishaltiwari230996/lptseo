@@ -131,6 +131,77 @@ machine silently enables it for the tests — the run goes from 3 seconds to 3
 minutes of real Google and Serper traffic and still passes, because these paths
 all degrade quietly.
 
+### Rank tracker schedule
+
+`POST /api/seo-geo/rank-tracker/cron` (header `x-cron-key: $SEO_CRON_KEY`) sweeps
+every enabled brand's rank pool. Cloud Scheduler runs it on `0 */2 * * *`.
+
+At 200 queries × 12 runs/day that is ~2,400 Serper searches per brand per day
+(~72,000/month). A per-brand ceiling of 3,000/day is enforced in
+`rank_tracker.MAX_SEARCHES_PER_DAY`; `SEO_RANK_SWEEP_DISABLED=1` stops it
+everywhere. To lower the cadence, change the Cloud Scheduler expression — no
+code change is needed.
+
+The cron sweeps brands **sequentially**, so its wall-clock runtime grows with
+brand count — manageable at one brand, worth revisiting before a second is
+onboarded.
+
+#### Before enabling the schedule
+
+Three explicit actions are required before the Cloud Scheduler job is created.
+Each must complete before the next:
+
+**(a) Verify Serper's billing for `num=20`**
+
+`sources.SERP_RESULTS` is currently `20`, chosen so positions 11–20 — the
+striking-distance band the worklist scores on — are visible. If Serper bills
+more than one credit for `num=20`, the real cost is double the arithmetic above.
+
+To verify: note the credit balance in your Serper account, then issue one search
+at `num=20` and one at `num=10` against `https://google.serper.dev/search` with
+`gl=in`/`hl=en`:
+
+```bash
+curl -s -X POST https://google.serper.dev/search \
+  -H "X-API-KEY: $SEO_SERPER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"q":"clat coaching","num":20,"gl":"in","hl":"en"}'
+
+curl -s -X POST https://google.serper.dev/search \
+  -H "X-API-KEY: $SEO_SERPER_API_KEY" -H "Content-Type: application/json" \
+  -d '{"q":"clat coaching","num":10,"gl":"in","hl":"en"}'
+```
+
+Compare the two credit deltas. If `num=20` costs more than one credit, the cost
+floor is doubled. In that case, set `SERP_RESULTS = 10` in `sources.py`, update
+the constant's comment to record the measured cost, and update the assertion
+in `test_brand_rank_search_sends_india_locale_and_depth` from `20` to `10` with
+a note explaining why.
+
+**(b) Run one manual sweep and inspect it**
+
+With the service deployed: in the Rank tracker panel, click **Rebuild pool**,
+then **Run now**. Confirm in the result panel that:
+- the pool reached a sensible size (e.g. 50–200 queries)
+- `meta.errors` is 0 or very near it
+- the ranks look like Indian SERPs (domains common in India, not US brands)
+- the worklist's top rows are queries worth working on
+
+**(c) Create the Cloud Scheduler job**
+
+```bash
+gcloud scheduler jobs create http seo-rank-sweep \
+  --schedule="0 */2 * * *" \
+  --uri="https://<service-host>/api/seo-geo/rank-tracker/cron" \
+  --http-method=POST \
+  --headers="x-cron-key=<SEO_CRON_KEY>" \
+  --attempt-deadline=900s \
+  --location=<region>
+```
+
+Replace `<service-host>` with your Cloud Run service URL, `<SEO_CRON_KEY>` with
+the value from `.env`, and `<region>` with the Cloud Scheduler region
+(e.g., `us-central1`).
+
 ### `--reload` does not work here
 
 Uvicorn's reloader detects the edit and prints `WatchFiles detected changes …
