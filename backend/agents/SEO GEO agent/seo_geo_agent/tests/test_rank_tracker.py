@@ -338,3 +338,72 @@ def test_rollup_reroll_with_later_stale_point_updates_last_and_at():
     assert triple["worst"] == 5
     assert triple["last"] == 3  # updated to later point
     assert triple["at"] > original_at  # updated to later hour
+
+
+def test_rollup_last_is_chronologically_final_when_points_appended_out_of_order():
+    """Even if points for the same day are appended out of hour order, last is the final hour's value."""
+    rt.append_history("b1", [_result("q", 3)], [], now=_at(1, 16))
+    rt.append_history("b1", [_result("q", 9)], [], now=_at(1, 8))  # earlier, appended second
+
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    triple = row["daily"][0][1]
+    assert triple["best"] == 3
+    assert triple["worst"] == 9
+    assert triple["last"] == 3  # hour 16 is chronologically last
+    assert triple["at"] == rt._epoch_hours(_at(1, 16))  # at hour 16
+
+
+def test_rollup_reroll_with_equal_at_replaces_last_and_at():
+    """A re-roll whose new final point has exactly the stored at should replace last and at."""
+    rt.append_history("b1", [_result("q", 5)], [], now=_at(1, 12))
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    original_at = row["daily"][0][1]["at"]
+
+    # Append new point at exactly the same hour (simulating backfill with same timestamp)
+    rt.append_history("b1", [_result("q", 7)], [], now=_at(1, 12))
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    triple = row["daily"][0][1]
+    assert triple["last"] == 7  # replaced with new observation at same hour
+    assert triple["at"] == original_at  # same hour
+
+
+def test_rollup_rival_last_is_chronologically_final():
+    """Rival series follow the same logic: last is the chronologically final point."""
+    top = [{"position": 8, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 5, top)], ["rival.com"], now=_at(1, 16))
+    top = [{"position": 12, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 9, top)], ["rival.com"], now=_at(1, 8))
+
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    rival_triple = row["rivals"]["rival.com"]["daily"][0][1]
+    assert rival_triple["best"] == 8
+    assert rival_triple["worst"] == 12
+    assert rival_triple["last"] == 8  # hour 16 is chronologically last
+
+
+def test_rollup_rival_reroll_with_equal_at_replaces_last():
+    """Rival series re-roll with equal at should replace last and at."""
+    top = [{"position": 5, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 9, top)], ["rival.com"], now=_at(1, 12))
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    original_at = row["rivals"]["rival.com"]["daily"][0][1]["at"]
+
+    # Append new rival point at exactly the same hour
+    top = [{"position": 3, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 9, top)], ["rival.com"], now=_at(1, 12))
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    rival_triple = row["rivals"]["rival.com"]["daily"][0][1]
+    assert rival_triple["last"] == 3  # replaced with new observation
+    assert rival_triple["at"] == original_at
