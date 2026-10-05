@@ -3091,6 +3091,7 @@ export interface RankGap {
     words: { ours: number | null; theirs: number | null };
     headings: { ours: number | null; theirs: number | null };
     schema: { ours: string[] | null; theirs: string[] | null };
+    questions: { ours: number | null; theirs: number | null };
   };
   narrative: string;
   notes: string[];

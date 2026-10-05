@@ -76,12 +76,14 @@ describe("rank tracker client", () => {
     expect(triple.last).toBeNull();
   });
 
-  it("posts the query in the body for a gap card", async () => {
+  it("posts the query in the body to the brand-scoped gap endpoint", async () => {
     const fetchMock = stub({ gap: { query: "q", narrative: "n" } });
 
     const { seoRankGap } = await import("./api");
     await seoRankGap("b1", "q");
 
+    expect(fetchMock.mock.calls[0][0]).toContain("/api/seo-geo/rank-tracker/b1/gap");
+    expect(fetchMock.mock.calls[0][1]?.method).toBe("POST");
     const init = fetchMock.mock.calls[0][1];
     expect(JSON.parse(init?.body as string)).toEqual({ query: "q" });
   });
