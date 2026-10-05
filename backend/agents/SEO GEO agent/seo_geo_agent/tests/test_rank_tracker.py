@@ -192,3 +192,72 @@ def test_pool_takes_max_impressions_when_query_appears_in_multiple_sources(monke
     assert len(doc["queries"]) == 1
     assert doc["queries"][0]["source"] == "custom"
     assert doc["queries"][0]["impressions"] == 777
+
+
+from datetime import datetime, timezone
+
+
+def _at(day: int, hour: int = 9) -> datetime:
+    return datetime(2026, 10, day, hour, tzinfo=timezone.utc)
+
+
+def _result(query: str, position, top=None) -> dict:
+    return {"query": query, "position": position, "url": "", "top": top or [], "error": None}
+
+
+def test_append_history_records_one_raw_point_per_run():
+    rt.append_history("b1", [_result("clat coaching", 9)], ["rival.com"], now=_at(5, 9))
+    rt.append_history("b1", [_result("clat coaching", 7)], ["rival.com"], now=_at(5, 11))
+
+    row = rt.history_for("b1", "clat coaching")
+    assert [p[1] for p in row["raw"]] == [9, 7]
+    assert row["raw"][0][0] < row["raw"][1][0]
+
+
+def test_append_history_tracks_rival_positions_only_for_tracked_competitors():
+    top = [{"position": 2, "domain": "rival.com", "url": "https://rival.com/a", "title": ""},
+           {"position": 3, "domain": "driveby.com", "url": "https://driveby.com/b", "title": ""}]
+    rt.append_history("b1", [_result("clat coaching", 9, top)], ["rival.com"], now=_at(5))
+
+    row = rt.history_for("b1", "clat coaching")
+    assert list(row["rivals"]) == ["rival.com"]
+    assert row["rivals"]["rival.com"]["raw"][0][1] == 2
+
+
+def test_append_history_skips_errored_results():
+    """An empty or failed SERP is missing data, not a rank of None."""
+    rt.append_history("b1", [{"query": "q", "position": None, "url": "", "top": [],
+                              "error": "serper 429"}], [], now=_at(5))
+    assert rt.history_for("b1", "q") is None
+
+
+def test_rollup_collapses_raw_points_older_than_the_window_into_daily_triples():
+    for hour in (8, 12, 16):
+        rt.append_history("b1", [_result("q", {8: 11, 12: 7, 16: 9}[hour])], [], now=_at(1, hour))
+    rt.append_history("b1", [_result("q", 5)], [], now=_at(20))  # inside the raw window
+
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    assert row["daily"] == [["2026-10-01", {"best": 7, "worst": 11, "last": 9}]]
+    assert [p[1] for p in row["raw"]] == [5]   # only the recent point survives
+
+
+def test_rollup_is_idempotent_within_a_day():
+    rt.append_history("b1", [_result("q", 4)], [], now=_at(1))
+    rt.rollup("b1", today=date(2026, 10, 20))
+    rt.rollup("b1", today=date(2026, 10, 20))
+
+    row = rt.history_for("b1", "q")
+    assert len(row["daily"]) == 1
+
+
+def test_rollup_trims_dailies_past_the_retention_window():
+    rt.append_history("b1", [_result("q", 4)], [], now=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    rt.rollup("b1", today=date(2026, 10, 20))     # 2026-01-01 is 292 days back
+    assert rt.history_for("b1", "q")["daily"] == []
+
+
+def test_history_survives_a_query_leaving_the_pool():
+    rt.append_history("b1", [_result("retired query", 12)], [], now=_at(5))
+    assert rt.history_for("b1", "retired query")["raw"][0][1] == 12

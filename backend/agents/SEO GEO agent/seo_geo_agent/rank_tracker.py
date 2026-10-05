@@ -225,3 +225,97 @@ def latest_pool(brand_id: str) -> dict | None:
 
 def active_queries(brand_id: str) -> list[str]:
     return [q["query"] for q in (latest_pool(brand_id) or {}).get("queries", []) if q.get("active")]
+
+
+def _epoch_hours(moment: datetime) -> int:
+    """Hour resolution keeps a point to a small integer. Twelve points a day
+    for 200 queries adds up; ISO strings would triple the document."""
+    return int(moment.timestamp() // 3600)
+
+
+def _hours_to_date(hours: int) -> date:
+    return datetime.fromtimestamp(hours * 3600, tz=timezone.utc).date()
+
+
+def all_history(brand_id: str) -> list[dict]:
+    rows, _ = jobs.load_list(HISTORY_PREFIX.format(brand_id))
+    return rows
+
+
+def history_for(brand_id: str, query: str) -> dict | None:
+    key = _norm(query)
+    return next((r for r in all_history(brand_id) if _norm(r["query"]) == key), None)
+
+
+def append_history(brand_id: str, results: list[dict], rivals: list[str],
+                   now: datetime | None = None) -> None:
+    """Add one point per successful result, for us and for each tracked rival.
+
+    Errored results are skipped deliberately. A Serper outage returns an empty
+    organic list for every query at once; recording that as ``position: None``
+    would write a site-wide collapse into history and light up the worklist
+    with 200 phantom regressions.
+    """
+    stamp = _epoch_hours(now or _now())
+    watched = [d.lower() for d in (rivals or [])]
+    rows = {_norm(r["query"]): r for r in all_history(brand_id)}
+
+    for result in results:
+        if result.get("error"):
+            continue
+        key = _norm(result["query"])
+        row = rows.get(key) or {"query": result["query"], "raw": [], "daily": [], "rivals": {}}
+        row["raw"] = row["raw"] + [[stamp, result.get("position")]]
+        by_domain = {entry["domain"]: entry["position"] for entry in result.get("top") or []}
+        for domain in watched:
+            series = row["rivals"].get(domain) or {"raw": [], "daily": []}
+            series["raw"] = series["raw"] + [[stamp, by_domain.get(domain)]]
+            row["rivals"][domain] = series
+        rows[key] = row
+
+    jobs.save_list(HISTORY_PREFIX.format(brand_id), list(rows.values()))
+
+
+def _roll_series(series: dict, cutoff_hours: int, oldest_day: date) -> dict:
+    """Collapse raw points older than the cutoff into one triple per day, then
+    drop dailies older than the retention window."""
+    keep_raw = [p for p in series.get("raw", []) if p[0] >= cutoff_hours]
+    stale = [p for p in series.get("raw", []) if p[0] < cutoff_hours]
+
+    buckets: dict[str, list[int]] = {}
+    for hours, position in stale:
+        if position is None:
+            continue
+        buckets.setdefault(_hours_to_date(hours).isoformat(), []).append(position)
+
+    daily = {day: triple for day, triple in series.get("daily", [])}
+    for day, positions in buckets.items():
+        existing = daily.get(day)
+        best = min(positions + ([existing["best"]] if existing else []))
+        worst = max(positions + ([existing["worst"]] if existing else []))
+        daily[day] = {"best": best, "worst": worst, "last": positions[-1]}
+
+    kept = sorted((d, t) for d, t in daily.items() if date.fromisoformat(d) >= oldest_day)
+    return {"raw": keep_raw, "daily": [[d, t] for d, t in kept]}
+
+
+def rollup(brand_id: str, today: date | None = None) -> int:
+    """Fold the raw tail into dailies and trim both windows. Returns rows touched.
+
+    Idempotent: a second call finds nothing older than the cutoff, so re-running
+    it after a restart or an overlapping sweep is safe.
+    """
+    day = today or _now().date()
+    cutoff = _epoch_hours(datetime(day.year, day.month, day.day, tzinfo=timezone.utc)) \
+        - RAW_RETENTION_DAYS * 24
+    oldest_day = date.fromordinal(day.toordinal() - DAILY_RETENTION_DAYS)
+
+    rows = all_history(brand_id)
+    for row in rows:
+        rolled = _roll_series(row, cutoff, oldest_day)
+        row["raw"], row["daily"] = rolled["raw"], rolled["daily"]
+        for domain, series in (row.get("rivals") or {}).items():
+            row["rivals"][domain] = _roll_series(series, cutoff, oldest_day)
+
+    jobs.save_list(HISTORY_PREFIX.format(brand_id), rows)
+    return len(rows)
