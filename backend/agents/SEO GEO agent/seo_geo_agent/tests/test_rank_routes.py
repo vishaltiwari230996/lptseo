@@ -84,3 +84,87 @@ def test_history_route_404s_for_an_unswept_query(client):
 def test_gap_route_404s_for_an_unswept_query(client):
     resp = client.post("/api/seo-geo/rank-tracker/b1/gap", json={"query": "nothing"})
     assert resp.status_code == 404
+
+
+# ------------------------- auth boundary: credit-spending routes -------------------------
+#
+# The `client` fixture above overrides both get_current_user AND require_creator
+# to the same creator identity, so nothing above exercises require_creator's own
+# body. If /sweep or /pool/rebuild were ever relaxed from require_creator down to
+# get_current_user, every test above would keep passing. This test wires
+# require_creator back to its real implementation (app/security.py:
+# `require_creator(user=Depends(get_current_user))`, which 403s unless
+# `user["is_creator"]` is true) and overrides only get_current_user with a
+# signed-in, non-creator identity shaped the way get_current_user actually
+# returns it (id/email/is_admin/is_creator/is_geo_editor/session_id/timezone) —
+# not guessed.
+
+def test_non_creator_is_blocked_from_credit_spending_routes_but_can_still_read(client):
+    app.dependency_overrides.pop(require_creator, None)  # run the real guard
+    non_creator = {
+        "id": "u2", "email": "noncreator@example.com",
+        "is_admin": False, "is_creator": False, "is_geo_editor": False,
+        "session_id": "s2", "timezone": "UTC",
+    }
+    app.dependency_overrides[get_current_user] = lambda: non_creator
+
+    assert client.post("/api/seo-geo/rank-tracker/b1/sweep").status_code == 403
+    assert client.post("/api/seo-geo/rank-tracker/b1/pool/rebuild").status_code == 403
+
+    # Same identity, the two reads: the boundary is the two credit-spending
+    # POSTs specifically, not "no non-creator request succeeds".
+    assert client.get("/api/seo-geo/rank-tracker/b1").status_code == 200
+    assert client.get("/api/seo-geo/rank-tracker/b1/history?query=nothing").status_code == 404
+
+
+# ------------------------------- success-path payload shape -------------------------------
+#
+# Everything above the auth-boundary test exercises 404/503/403/200(cron)/502 —
+# the unit logic behind each POST is covered elsewhere (rank_tracker's and
+# rank_gap's own test files). What has no coverage yet is the route layer's own
+# contract on a *successful* sweep-start / pool-rebuild / gap-card: that the
+# response has the shape callers depend on.
+
+def test_sweep_route_starts_a_job_when_online(client, monkeypatch):
+    from seo_geo_agent import jobs as seo_jobs
+    from seo_geo_agent import state as seo_state
+    monkeypatch.setattr(seo_state, "use_network", lambda: True)
+    stub_job = {"kind": "rank-sweep", "status": "running", "progress": 0}
+    monkeypatch.setattr(seo_jobs, "start", lambda kind, brand_id, body: stub_job)
+
+    resp = client.post("/api/seo-geo/rank-tracker/b1/sweep")
+    assert resp.status_code == 200
+    assert resp.json()["job"] == stub_job
+
+
+def test_pool_rebuild_route_returns_the_full_rank_payload(client, monkeypatch):
+    from seo_geo_agent import rank_tracker
+    monkeypatch.setattr(rank_tracker, "build_pool", lambda brand, rows_fn=None: {
+        "queries": [{"query": "q1", "active": True}],
+        "sources_used": ["gsc"], "notes": [], "built_at": "2026-10-05",
+    })
+
+    resp = client.post("/api/seo-geo/rank-tracker/b1/pool/rebuild")
+    assert resp.status_code == 200
+    body = resp.json()
+    # _rank_payload re-reads via seo_rank.latest_pool(), not the mocked
+    # build_pool() return value directly, so this pins the route's response
+    # shape rather than a size that depends on persistence this test does not
+    # exercise.
+    assert set(body) >= {"rows", "worklist", "pool", "budget", "job", "meta",
+                         "competitors", "enabled"}
+
+
+def test_gap_route_returns_the_gap_card_on_success(client, monkeypatch):
+    from seo_geo_agent import rank_gap
+    stub = {
+        "query": "q1", "our_url": "", "our_position": None,
+        "their_url": "https://rival.com/x", "their_domain": "rival.com",
+        "their_position": 3, "metrics": {}, "narrative": "they have more words",
+        "notes": [], "at": "2026-10-05T00:00:00+00:00",
+    }
+    monkeypatch.setattr(rank_gap, "explain", lambda brand, query: stub)
+
+    resp = client.post("/api/seo-geo/rank-tracker/b1/gap", json={"query": "q1"})
+    assert resp.status_code == 200
+    assert resp.json()["gap"]["their_domain"] == "rival.com"
