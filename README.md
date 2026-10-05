@@ -196,20 +196,69 @@ then **Run now**. Confirm in the result panel that:
 
 **(b) Create the Cloud Scheduler job**
 
+The backend is **not** publicly invokable — its only `roles/run.invoker`
+member is the frontend's service account. A Scheduler job that sends nothing
+but the `x-cron-key` header is rejected by Cloud Run's IAM layer with an HTML
+403 and never reaches the application, so the sweep silently never runs. The
+job therefore needs an **OIDC token** as well as the header: the header proves
+"this caller knows the cron secret", the token proves "this caller may invoke
+this service". Both are required.
+
+First, a dedicated caller identity with permission to invoke the service:
+
 ```bash
-gcloud scheduler jobs create http seo-rank-sweep \
-  --schedule="0 */2 * * *" \
-  --uri="https://<service-host>/api/seo-geo/rank-tracker/cron" \
-  --http-method=POST \
-  --headers="x-cron-key=<SEO_CRON_KEY>" \
-  --attempt-deadline=900s \
-  --max-retry-attempts=0 \
-  --location=<region>
+PROJECT=lpt-seo-agent
+REGION=asia-south1
+URL=$(gcloud run services describe seo-agent-backend \
+      --project=$PROJECT --region=$REGION --format='value(status.url)')
+
+gcloud iam service-accounts create seo-rank-cron \
+  --project=$PROJECT --display-name="Rank tracker scheduler"
+
+gcloud run services add-iam-policy-binding seo-agent-backend \
+  --project=$PROJECT --region=$REGION \
+  --member="serviceAccount:seo-rank-cron@$PROJECT.iam.gserviceaccount.com" \
+  --role=roles/run.invoker
 ```
 
-Replace `<service-host>` with your Cloud Run service URL, `<SEO_CRON_KEY>` with
-the value from `.env`, and `<region>` with the Cloud Scheduler region
-(e.g., `us-central1`).
+Then the job itself (Cloud Scheduler API must be enabled on the project first
+— `gcloud services enable cloudscheduler.googleapis.com`):
+
+```bash
+gcloud scheduler jobs create http seo-rank-sweep \
+  --project=$PROJECT \
+  --location=$REGION \
+  --schedule="0 */2 * * *" \
+  --time-zone="Asia/Kolkata" \
+  --uri="$URL/api/seo-geo/rank-tracker/cron" \
+  --http-method=POST \
+  --headers="x-cron-key=<SEO_CRON_KEY>" \
+  --oidc-service-account-email="seo-rank-cron@$PROJECT.iam.gserviceaccount.com" \
+  --oidc-token-audience="$URL" \
+  --attempt-deadline=900s \
+  --max-retry-attempts=0
+```
+
+`<SEO_CRON_KEY>` is the value stored in the `SEO_CRON_KEY` secret. The service
+must also reference that secret as an environment variable
+(`--update-secrets=SEO_CRON_KEY=SEO_CRON_KEY:latest`) and its runtime service
+account needs `roles/secretmanager.secretAccessor` on it — until both are in
+place the endpoint answers `503 SEO_CRON_KEY not configured` and fails closed,
+which is the intended behaviour, not a fault.
+
+Verify the wiring before trusting the schedule, by calling it exactly as the
+scheduler will:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST \
+  -H "Authorization: Bearer $(gcloud auth print-identity-token)" \
+  -H "x-cron-key: <SEO_CRON_KEY>" \
+  "$URL/api/seo-geo/rank-tracker/cron"
+```
+
+`200` means a sweep ran. `403` means the header is wrong. `503` means the
+secret is not wired. An HTML `403` with no JSON body means the IAM layer
+rejected the caller before the app saw it — the OIDC half is missing.
 
 **`--max-retry-attempts=0` is not optional.** Cloud Scheduler's default is to
 retry a non-2xx response, and this endpoint answers 502 when every brand's
