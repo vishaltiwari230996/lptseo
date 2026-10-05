@@ -536,6 +536,7 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
         def search(query: str) -> dict:
             return sources.brand_rank_search(query, owned_client, gl=gl)
 
+    started = False
     try:
         # One sweep per brand at a time, across every process. `jobs.start`
         # refuses a second manual run, but the cron calls this inline without
@@ -545,8 +546,15 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
         # interleave their history writes. Refused rather than queued: a
         # second simultaneous reading of the same SERPs is worth nothing.
         with state.lease(SWEEP_LOCK_DOC.format(brand_id), ttl=SWEEP_LEASE_TTL, wait=0):
+            started = True
             return _sweep_locked(brand, search, moment, stamp, progress, notes)
     except state.Busy:
+        if started:
+            # Not this lease — one taken deeper in, by `append_history` or
+            # `rollup`, after the searches were already charged. Reporting it
+            # as "another sweep is running, nothing was charged" would be a
+            # lie about money. Let it surface as the failure it is.
+            raise
         if progress:
             progress.note("another sweep is already running for this brand")
         return _record_sweep(brand_id, {

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
+
 from seo_geo_agent import rank_tracker as rt
 from seo_geo_agent import state
 
@@ -1323,3 +1325,25 @@ def test_the_sweep_shares_one_http_client_across_every_query(monkeypatch):
     assert len(seen) == 3
     assert seen[0] is not None, "the sweep must pass a client, not let each call open its own"
     assert all(c is seen[0] for c in seen), "every query must reuse the one connection pool"
+
+
+def test_a_history_lease_timeout_is_not_reported_as_another_sweep(monkeypatch):
+    """`blocked: "running"` says "nothing was charged". A lease taken deeper
+    in — by append_history, after 200 searches are already paid for — must
+    not be reported with that sentence."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def busy_history(*a, **kw):
+        raise state.Busy("history lease held")
+
+    monkeypatch.setattr(rt, "append_history", busy_history)
+
+    with pytest.raises(state.Busy):
+        rt.sweep(_brand(), search=lambda q, **kw: _serp((3, "https://lawpreptutorial.com/a")),
+                 now=_at(5, 9))
+
+    # The search WAS charged, so nothing may claim otherwise.
+    assert rt.budget_status("b1", today=date(2026, 10, 5))["searches"] == 1

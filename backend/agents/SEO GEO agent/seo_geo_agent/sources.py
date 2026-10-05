@@ -421,6 +421,14 @@ def brand_rank_search(query: str, client: httpx.Client | None = None, *,
     DataForSEO backend; the two providers must never be conflated. Same
     return shape as serper_search() so rank_snapshot() doesn't care which
     provider answered.
+
+    ``client`` is a shared ``httpx.Client`` to issue the request on. Pass one
+    whenever you are about to make more than a handful of calls: a rank sweep
+    is 200 searches against the same host, and a client per call is 200 TLS
+    handshakes — minutes of pure connection setup, and a correspondingly
+    longer window for Cloud Run to kill the job mid-sweep (see the
+    ``--timeout=900`` note in the README). ``rank_tracker.sweep`` passes one;
+    every other caller leaves it None and gets a private client, closed here.
     """
     key = _real_serper_key()
     if not key or not state.use_network():

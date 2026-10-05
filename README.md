@@ -195,12 +195,36 @@ gcloud scheduler jobs create http seo-rank-sweep \
   --http-method=POST \
   --headers="x-cron-key=<SEO_CRON_KEY>" \
   --attempt-deadline=900s \
+  --max-retry-attempts=0 \
   --location=<region>
 ```
 
 Replace `<service-host>` with your Cloud Run service URL, `<SEO_CRON_KEY>` with
 the value from `.env`, and `<region>` with the Cloud Scheduler region
 (e.g., `us-central1`).
+
+**`--max-retry-attempts=0` is not optional.** Cloud Scheduler's default is to
+retry a non-2xx response, and this endpoint answers 502 when every brand's
+sweep failed — which is exactly the situation in which Serper is returning
+errors for everything. Each retry re-enters the sweep and `charge()`s another
+~200 searches before the first query comes back, so a provider outage during
+one scheduled run would bill for several. There is another run in two hours;
+that is the retry. (A retry is also usually pointless for a different reason:
+the sweep refuses to start while another one holds the brand's lease, so a
+retry that arrives before the first attempt has finished is answered without
+doing anything at all.)
+
+**The Cloud Run service needs `--timeout=900` to match the
+`--attempt-deadline=900s` above.** They are two separate ceilings and the
+lower one wins. The sweep `charge()`s each query up front but writes its
+results once, at the end, so a kill part-way through has spent every credit
+and stored nothing — a Cloud Run default timeout of 300s against a
+900s-deadline schedule means a long sweep is cut off two thirds of the way
+through and the whole run is wasted:
+
+```bash
+gcloud run services update <service> --timeout=900 --region=<region>
+```
 
 ### `--reload` does not work here
 
