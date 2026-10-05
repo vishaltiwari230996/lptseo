@@ -26,6 +26,8 @@ import os
 import re
 from datetime import date, datetime, timezone
 
+import httpx
+
 from . import jobs, sources, state
 
 #: The pool ceiling. A hard bound in code, not a UI suggestion.
@@ -41,6 +43,10 @@ RAW_RETENTION_DAYS = 7
 DAILY_RETENTION_DAYS = 180
 #: Harvested related/PAA queries kept between rebuilds.
 HARVEST_KEEP = 2000
+#: Tracked competitors whose position is recorded alongside ours. One constant,
+#: because the sweep and the worklist disagreeing about this means a rival the
+#: worklist scores as "tracked" has no series in history, or the reverse.
+MAX_RIVALS = 8
 
 JOB_KIND = "rank-sweep"
 
@@ -49,6 +55,19 @@ BUDGET_DOC = "rank-budget-{}"
 HARVEST_DOC = "rank-harvest-{}"
 LATEST_PREFIX = "rank-latest-{}"
 HISTORY_PREFIX = "rank-history-{}"
+#: Outcome of the most recent sweep, whatever it was. Written even when the
+#: sweep wrote nothing else (disabled, no credentials, already running), which
+#: is exactly the case the panel used to render as "all clear".
+SWEEP_DOC = "rank-sweep-{}"
+#: Serialises the whole sweep across processes, and the chunked history
+#: read-modify-write inside it. See the lease comments at each use.
+SWEEP_LOCK_DOC = "rank-sweeplock-{}"
+HISTORY_LOCK_DOC = "rank-histlock-{}"
+#: A sweep of 200 queries takes minutes; the lease must outlive the worst case
+#: but still expire, so a killed Cloud Run instance cannot wedge the schedule.
+#: Matched to the documented Cloud Run ``--timeout=900``.
+SWEEP_LEASE_TTL = 900
+HISTORY_LEASE_TTL = 120
 #: The sweep's own "did I roll up today" stamp. Deliberately NOT a field on
 #: POOL_DOC: build_pool() writes a wholesale fresh dict to that document, so
 #: a same-day pool rebuild between two sweeps would silently erase a stamp
@@ -243,6 +262,69 @@ def _hours_to_date(hours: int) -> date:
     return datetime.fromtimestamp(hours * 3600, tz=timezone.utc).date()
 
 
+# --------------------------------------------------------------------------- #
+# History encoding
+#
+# Every point is a MAP, never a nested array. This is not a style choice:
+# Firestore rejects an array whose elements are themselves arrays outright —
+# ``InvalidArgument 400 Property array contains an invalid nested entity`` —
+# so the obvious ``raw: [[hour, position], …]`` / ``daily: [[date, {…}], …]``
+# encoding could not be written at all. The failure mode was expensive and
+# completely silent offline, where the local JSON backend accepts anything:
+# every production sweep charged its full ~200-search Serper bill, saved
+# ``rank-latest``, and then died in ``append_history`` before one history
+# document landed. No history means ``delta_7d`` is always null, the dropout
+# flag is always false, the history route 404s forever and the rollup never
+# runs — a tracker that tracks nothing, at full price, with nothing in the UI
+# saying so.
+#
+# Keys are one character because this is by far the largest document set in
+# the system (measured: 2.5 MB at 0 rivals, 22.4 MB at 8):
+#   raw point   {"h": epoch hour, "p": position or None}
+#   daily point {"d": "YYYY-MM-DD", "best": …, "worst": …, "last": …, "at": …}
+# --------------------------------------------------------------------------- #
+
+def _raw_point(hours: int, position: int | None) -> dict:
+    return {"h": hours, "p": position}
+
+
+def _rival_key(value: str) -> str:
+    """A tracked rival's domain, normalised the same way a SERP link's host is.
+
+    ``sources.domain_of`` lowercases and strips ``www.``; a domain a human
+    typed can also arrive as a full URL, with a path, or with a trailing dot.
+    If the two are not reduced to the same string the rival never matches
+    anything in the SERP — its series is empty, the ``tracked_rival`` scoring
+    boost never fires, and nothing anywhere reports a problem.
+    """
+    from . import insights
+
+    try:
+        return insights.normalize_domain(value)
+    except ValueError:
+        # Not a domain at all (empty, or something unparseable a brand doc
+        # predating normalisation still holds). Fall back to the old reduction
+        # rather than dropping the entry: a useless key is still better than a
+        # KeyError on every sweep.
+        return sources.domain_of(value or "")
+
+
+def tracked_rivals(brand: dict) -> list[str]:
+    """The brand's tracked competitor domains: normalised, deduped, capped.
+
+    One accessor so the sweep, the worklist and the panel payload cannot
+    disagree about which rivals are tracked — they previously applied
+    ``[:MAX_RIVALS]`` in two of the three places and a bare ``.lower()`` in
+    all three.
+    """
+    seen: dict[str, None] = {}
+    for raw in brand.get("competitors") or []:
+        key = _rival_key(raw)
+        if key:
+            seen.setdefault(key, None)
+    return list(seen)[:MAX_RIVALS]
+
+
 def all_history(brand_id: str) -> list[dict]:
     rows, _ = jobs.load_list(HISTORY_PREFIX.format(brand_id))
     return rows
@@ -255,45 +337,70 @@ def history_for(brand_id: str, query: str) -> dict | None:
 
 def append_history(brand_id: str, results: list[dict], rivals: list[str],
                    now: datetime | None = None) -> None:
-    """Add one point per successful result, for us and for each tracked rival.
+    """Add one point per successful result, for us and for each tracked rival
+    that actually appeared in the SERP.
 
     Errored results are skipped deliberately. A Serper outage returns an empty
     organic list for every query at once; recording that as ``position: None``
     would write a site-wide collapse into history and light up the worklist
     with 200 phantom regressions.
+
+    A rival that did not appear gets NO point, rather than a null one. The old
+    encoding wrote one ``position: None`` per tracked rival per query per
+    sweep whether or not that rival was anywhere near the results — at eight
+    rivals that was about 90% of a measured 22.4 MB of history, paid for on
+    every read of every panel load, to store the fact that someone was absent.
+    An absent hour is already a gap in the series, which is what the chart
+    draws and what ``_delta_from`` reads, so the nulls carried no information
+    the absence did not.
+
+    Read-modify-write under a lease. History is chunked across a manifest plus
+    N chunk documents, so ``state.mutate`` — which transacts over exactly one
+    document — cannot express it, and the plain ``load`` + ``save`` this used
+    to be loses points whenever two sweeps overlap. The spec's answer was
+    "``jobs.start`` serialises one job per (kind, brand)", but the cron calls
+    ``sweep`` inline without it, and ``jobs._RUNNING`` is process-local so it
+    would not serialise across Cloud Run instances even if it did.
     """
     stamp = _epoch_hours(now or _now())
-    watched = [d.lower() for d in (rivals or [])]
-    rows = {_norm(r["query"]): r for r in all_history(brand_id)}
+    watched = [_rival_key(d) for d in (rivals or [])]
 
-    for result in results:
-        if result.get("error"):
-            continue
-        key = _norm(result["query"])
-        row = rows.get(key) or {"query": result["query"], "raw": [], "daily": [], "rivals": {}}
-        row["raw"] = row["raw"] + [[stamp, result.get("position")]]
-        by_domain = {entry["domain"]: entry["position"] for entry in result.get("top") or []}
-        for domain in watched:
-            series = row["rivals"].get(domain) or {"raw": [], "daily": []}
-            series["raw"] = series["raw"] + [[stamp, by_domain.get(domain)]]
-            row["rivals"][domain] = series
-        rows[key] = row
+    with state.lease(HISTORY_LOCK_DOC.format(brand_id),
+                     ttl=HISTORY_LEASE_TTL, wait=HISTORY_LEASE_TTL):
+        rows = {_norm(r["query"]): r for r in all_history(brand_id)}
 
-    jobs.save_list(HISTORY_PREFIX.format(brand_id), list(rows.values()))
+        for result in results:
+            if result.get("error"):
+                continue
+            key = _norm(result["query"])
+            row = rows.get(key) or {"query": result["query"], "raw": [], "daily": [], "rivals": {}}
+            row["raw"] = row["raw"] + [_raw_point(stamp, result.get("position"))]
+            by_domain = {_rival_key(entry["domain"]): entry["position"]
+                         for entry in result.get("top") or []}
+            for domain in watched:
+                spotted = by_domain.get(domain)
+                if spotted is None:
+                    continue  # absent from this SERP — a gap, not a null point
+                series = row["rivals"].get(domain) or {"raw": [], "daily": []}
+                series["raw"] = series["raw"] + [_raw_point(stamp, spotted)]
+                row["rivals"][domain] = series
+            rows[key] = row
+
+        jobs.save_list(HISTORY_PREFIX.format(brand_id), list(rows.values()))
 
 
 def _roll_series(series: dict, cutoff_hours: int, oldest_day: date) -> dict:
     """Collapse raw points older than the cutoff into one triple per day, then
     drop dailies older than the retention window."""
-    keep_raw = [p for p in series.get("raw", []) if p[0] >= cutoff_hours]
-    stale = [p for p in series.get("raw", []) if p[0] < cutoff_hours]
+    keep_raw = [p for p in series.get("raw", []) if p["h"] >= cutoff_hours]
+    stale = [p for p in series.get("raw", []) if p["h"] < cutoff_hours]
 
     buckets: dict[str, list[tuple[int, int | None]]] = {}
-    for hours, position in stale:
-        day_str = _hours_to_date(hours).isoformat()
-        buckets.setdefault(day_str, []).append((hours, position))
+    for point in stale:
+        day_str = _hours_to_date(point["h"]).isoformat()
+        buckets.setdefault(day_str, []).append((point["h"], point["p"]))
 
-    daily = {day: triple for day, triple in series.get("daily", [])}
+    daily = {entry["d"]: entry for entry in series.get("daily", [])}
     for day, points_with_hours in buckets.items():
         existing = daily.get(day)
         positions = [pos for _, pos in points_with_hours]
@@ -315,14 +422,18 @@ def _roll_series(series: dict, cutoff_hours: int, oldest_day: date) -> dict:
         last = sorted_points[-1][1]
         at = sorted_points[-1][0]
         if existing and existing.get("at") is not None and at < existing["at"]:
-            # Earlier or same point; keep the existing last and at
+            # Strictly earlier point: keep the existing last and at. An equal
+            # `at` deliberately falls through and REPLACES them — a re-roll of
+            # the same hour is a fresher observation of that hour, not a
+            # duplicate of it.
             last = existing["last"]
             at = existing["at"]
 
-        daily[day] = {"best": best, "worst": worst, "last": last, "at": at}
+        daily[day] = {"d": day, "best": best, "worst": worst, "last": last, "at": at}
 
-    kept = sorted((d, t) for d, t in daily.items() if date.fromisoformat(d) >= oldest_day)
-    return {"raw": keep_raw, "daily": [[d, t] for d, t in kept]}
+    kept = sorted((entry["d"], entry) for entry in daily.values()
+                  if date.fromisoformat(entry["d"]) >= oldest_day)
+    return {"raw": keep_raw, "daily": [entry for _, entry in kept]}
 
 
 def rollup(brand_id: str, today: date | None = None) -> int:
@@ -336,14 +447,19 @@ def rollup(brand_id: str, today: date | None = None) -> int:
         - RAW_RETENTION_DAYS * 24
     oldest_day = date.fromordinal(day.toordinal() - DAILY_RETENTION_DAYS)
 
-    rows = all_history(brand_id)
-    for row in rows:
-        rolled = _roll_series(row, cutoff, oldest_day)
-        row["raw"], row["daily"] = rolled["raw"], rolled["daily"]
-        for domain, series in (row.get("rivals") or {}).items():
-            row["rivals"][domain] = _roll_series(series, cutoff, oldest_day)
+    # Same lease as append_history, and for the same reason: this is a
+    # read-modify-write across the whole chunk set, which no single-document
+    # transaction can cover.
+    with state.lease(HISTORY_LOCK_DOC.format(brand_id),
+                     ttl=HISTORY_LEASE_TTL, wait=HISTORY_LEASE_TTL):
+        rows = all_history(brand_id)
+        for row in rows:
+            rolled = _roll_series(row, cutoff, oldest_day)
+            row["raw"], row["daily"] = rolled["raw"], rolled["daily"]
+            for domain, series in (row.get("rivals") or {}).items():
+                row["rivals"][domain] = _roll_series(series, cutoff, oldest_day)
 
-    jobs.save_list(HISTORY_PREFIX.format(brand_id), rows)
+        jobs.save_list(HISTORY_PREFIX.format(brand_id), rows)
     return len(rows)
 
 
@@ -368,37 +484,87 @@ def latest_meta(brand_id: str) -> dict | None:
     return meta
 
 
+def last_sweep(brand_id: str) -> dict | None:
+    """The most recent sweep's own report, however it ended.
+
+    ``rank-latest`` only exists when a sweep produced usable rows, so it can
+    say nothing about a sweep that was switched off, had no API key, or found
+    another run already in progress. Those three all wrote nothing at all and
+    still reported the job as ``done``, which the panel rendered as "all
+    clear" — "Run now" enabled, no explanation anywhere. This document is the
+    one place that always answers "what happened last time".
+    """
+    return state.load(SWEEP_DOC.format(brand_id))
+
+
+def _record_sweep(brand_id: str, outcome: dict) -> dict:
+    state.save(SWEEP_DOC.format(brand_id), outcome)
+    return outcome
+
+
 def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
     """One pass over every active query. Never raises for a single bad SERP."""
     brand_id = brand["id"]
     moment = now or _now()
+    stamp = moment.isoformat(timespec="seconds")
     notes: list[str] = []
 
     if not enabled(brand):
-        return {"checked": 0, "ranked": 0, "errors": 0, "blocked": "disabled",
-                "at": moment.isoformat(timespec="seconds"),
-                "notes": ["Rank tracking is switched off for this brand"]}
+        return _record_sweep(brand_id, {
+            "checked": 0, "ranked": 0, "errors": 0, "blocked": "disabled", "at": stamp,
+            "notes": ["Rank tracking is switched off for this brand"]})
 
+    owned_client = None
     if search is None:
         if not sources.brand_rank_available():
-            return {"checked": 0, "ranked": 0, "errors": 0, "blocked": "credentials",
-                    "at": moment.isoformat(timespec="seconds"),
-                    "notes": ["SEO_SERPER_API_KEY not set — rank tracking needs live SERPs"]}
+            return _record_sweep(brand_id, {
+                "checked": 0, "ranked": 0, "errors": 0, "blocked": "credentials", "at": stamp,
+                "notes": ["SEO_SERPER_API_KEY not set — rank tracking needs live SERPs"]})
         # Global Constraints: SERP country is overridable per brand. This is
         # the only caller that holds the brand doc, so the override is
         # plumbed in here, via a closure, rather than changing what a caller
         # passes — an injected ``search`` (every test above) stays a plain
         # ``search(query)`` call with no extra kwargs.
         gl = (brand.get("serp_country") or sources.SERP_COUNTRY).strip().lower()
+        # One connection pool for the whole sweep. `brand_rank_search` opens
+        # its own client when it is not handed one, which at 200 queries is
+        # 200 TLS handshakes to the same host — minutes of pure setup, and a
+        # longer window for Cloud Run to kill the job mid-sweep. The optional
+        # parameter already existed; nobody was passing it.
+        owned_client = httpx.Client(timeout=20)
 
         def search(query: str) -> dict:
-            return sources.brand_rank_search(query, gl=gl)
+            return sources.brand_rank_search(query, owned_client, gl=gl)
 
+    try:
+        # One sweep per brand at a time, across every process. `jobs.start`
+        # refuses a second manual run, but the cron calls this inline without
+        # it, and `jobs._RUNNING` is a dict in one Python process while Cloud
+        # Run holds several — so neither guard survives contact with the
+        # schedule. Two overlapping sweeps double the Serper bill and
+        # interleave their history writes. Refused rather than queued: a
+        # second simultaneous reading of the same SERPs is worth nothing.
+        with state.lease(SWEEP_LOCK_DOC.format(brand_id), ttl=SWEEP_LEASE_TTL, wait=0):
+            return _sweep_locked(brand, search, moment, stamp, progress, notes)
+    except state.Busy:
+        if progress:
+            progress.note("another sweep is already running for this brand")
+        return _record_sweep(brand_id, {
+            "checked": 0, "ranked": 0, "errors": 0, "blocked": "running", "at": stamp,
+            "notes": ["Another sweep for this brand is already running — nothing was charged"]})
+    finally:
+        if owned_client is not None:
+            owned_client.close()
+
+
+def _sweep_locked(brand: dict, search, moment: datetime, stamp: str,
+                  progress, notes: list[str]) -> dict:
+    brand_id = brand["id"]
     queries = active_queries(brand_id)
     if progress:
         progress.phase(f"checking {len(queries)} queries", total=len(queries))
 
-    rivals = [d.lower() for d in (brand.get("competitors") or [])][:8]
+    rivals = tracked_rivals(brand)
     results: list[dict] = []
     harvested: list[str] = []
     ranked = errors = 0
@@ -412,7 +578,7 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
                 progress.note("daily budget reached, stopping")
             break
         row = {"query": query, "position": None, "url": "",
-               "checked_at": moment.isoformat(timespec="seconds"), "top": [], "error": None}
+               "checked_at": stamp, "top": [], "error": None}
         try:
             serp = search(query)
             organic = serp.get("organic") or []
@@ -442,9 +608,24 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
         if progress:
             progress.step()
 
-    jobs.save_list(LATEST_PREFIX.format(brand_id), results,
-                   meta={"at": moment.isoformat(timespec="seconds"),
-                         "ranked": ranked, "errors": errors, "rivals": rivals})
+    # A sweep in which EVERY row errored is a Serper outage, not a day on
+    # which we rank nowhere — the same distinction `append_history` and the
+    # `rank_snapshot` projection already make. Overwriting `rank-latest` with
+    # it replaced a real scoreboard with 200 unusable rows, which
+    # `annotate_rows` then skipped one by one, leaving the panel showing
+    # "Nothing urgent…" and "No queries match this filter" over a total
+    # outage. The previous results are kept; the failure is reported through
+    # the sweep document below instead. A PARTIAL failure still writes: those
+    # rows carry real rankings.
+    total_outage = bool(results) and errors == len(results)
+    if total_outage:
+        notes.append(f"Every one of the {errors} queries checked failed — "
+                     "keeping the previous results rather than overwriting them")
+        if progress:
+            progress.note("every query errored; previous results kept")
+    else:
+        jobs.save_list(LATEST_PREFIX.format(brand_id), results,
+                       meta={"at": stamp, "ranked": ranked, "errors": errors, "rivals": rivals})
     record_harvest(brand_id, harvested)
     append_history(brand_id, results, rivals, now=moment)
 
@@ -454,8 +635,9 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
         rollup(brand_id, today=moment.date())
         state.save(ROLLUP_DOC.format(brand_id), {"on": today_str})
 
-    return {"checked": len(results), "ranked": ranked, "errors": errors, "blocked": blocked,
-            "at": moment.isoformat(timespec="seconds"), "notes": notes}
+    return _record_sweep(brand_id, {
+        "checked": len(results), "ranked": ranked, "errors": errors, "blocked": blocked,
+        "at": stamp, "notes": notes})
 
 
 #: Below this the query is already won and effort is better spent elsewhere;
@@ -487,17 +669,17 @@ def _delta_from(history_row: dict, hours: int) -> int | None:
     if not history_row or not history_row.get("raw"):
         return None
     raw = history_row["raw"]
-    if not raw or raw[-1][1] is None:
+    if not raw or raw[-1]["p"] is None:
         # Current position is unranked; no numeric delta to report.
         return None
     now_point = raw[-1]
-    ranked_points = [p for p in raw if p[1] is not None]
+    ranked_points = [p for p in raw if p["p"] is not None]
     if len(ranked_points) < 2:
         return None
-    cutoff = now_point[0] - hours
-    older = [p for p in ranked_points[:-1] if p[0] <= cutoff]
+    cutoff = now_point["h"] - hours
+    older = [p for p in ranked_points[:-1] if p["h"] <= cutoff]
     baseline = older[-1] if older else ranked_points[0]
-    return baseline[1] - now_point[1]
+    return baseline["p"] - now_point["p"]
 
 
 def delta(brand_id: str, query: str, hours: int) -> int | None:
@@ -521,12 +703,12 @@ def _lost_ranking_from(history_row: dict, hours: int) -> bool:
     if not history_row or not history_row.get("raw"):
         return False
     raw = history_row["raw"]
-    if not raw or raw[-1][1] is not None:
+    if not raw or raw[-1]["p"] is not None:
         # Either no history or currently ranked; no dropout.
         return False
     # Latest is unranked. Check if we were ranked somewhere in the window.
-    cutoff = raw[-1][0] - hours
-    return any(p[0] >= cutoff and p[1] is not None for p in raw[:-1])
+    cutoff = raw[-1]["h"] - hours
+    return any(p["h"] >= cutoff and p["p"] is not None for p in raw[:-1])
 
 
 def lost_ranking(brand_id: str, query: str, hours: int) -> bool:
@@ -601,7 +783,12 @@ def worklist(brand: dict, limit: int = 10, rows: list[dict] | None = None) -> li
     second time for the same request. Left ``None`` (every existing caller
     and test), this calls ``annotate_rows`` itself.
     """
-    rivals = {d.lower() for d in (brand.get("competitors") or [])}
+    # Same accessor the sweep uses. Read uncapped and bare-lowercased, this
+    # set disagreed with the sweep's capped, normalised one in two ways: a
+    # ninth competitor scored a `tracked_rival` boost for a rival the sweep
+    # never recorded history for, and a competitor stored as a pasted URL or
+    # with a "www." prefix matched no SERP domain at all and so never scored.
+    rivals = set(tracked_rivals(brand))
     source = annotate_rows(brand) if rows is None else rows
 
     out: list[dict] = []

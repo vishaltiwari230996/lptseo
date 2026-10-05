@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import date
 
 from seo_geo_agent import rank_tracker as rt
+from seo_geo_agent import state
 
 
 def _brand(**over) -> dict:
@@ -210,8 +211,8 @@ def test_append_history_records_one_raw_point_per_run():
     rt.append_history("b1", [_result("clat coaching", 7)], ["rival.com"], now=_at(5, 11))
 
     row = rt.history_for("b1", "clat coaching")
-    assert [p[1] for p in row["raw"]] == [9, 7]
-    assert row["raw"][0][0] < row["raw"][1][0]
+    assert [p["p"] for p in row["raw"]] == [9, 7]
+    assert row["raw"][0]["h"] < row["raw"][1]["h"]
 
 
 def test_append_history_tracks_rival_positions_only_for_tracked_competitors():
@@ -221,7 +222,7 @@ def test_append_history_tracks_rival_positions_only_for_tracked_competitors():
 
     row = rt.history_for("b1", "clat coaching")
     assert list(row["rivals"]) == ["rival.com"]
-    assert row["rivals"]["rival.com"]["raw"][0][1] == 2
+    assert row["rivals"]["rival.com"]["raw"][0]["p"] == 2
 
 
 def test_append_history_skips_errored_results():
@@ -239,9 +240,8 @@ def test_rollup_collapses_raw_points_older_than_the_window_into_daily_triples():
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    daily_entry = row["daily"][0]
-    assert daily_entry[0] == "2026-10-01"
-    triple = daily_entry[1]
+    triple = row["daily"][0]
+    assert triple["d"] == "2026-10-01"
     assert triple["best"] == 7
     assert triple["worst"] == 11
     assert triple["last"] == 9
@@ -265,7 +265,7 @@ def test_rollup_trims_dailies_past_the_retention_window():
 
 def test_history_survives_a_query_leaving_the_pool():
     rt.append_history("b1", [_result("retired query", 12)], [], now=_at(5))
-    assert rt.history_for("b1", "retired query")["raw"][0][1] == 12
+    assert rt.history_for("b1", "retired query")["raw"][0]["p"] == 12
 
 
 def test_rollup_keeps_days_with_all_none_positions():
@@ -277,7 +277,7 @@ def test_rollup_keeps_days_with_all_none_positions():
     
     row = rt.history_for("b1", "q")
     assert len(row["daily"]) == 1
-    triple = row["daily"][0][1]
+    triple = row["daily"][0]
     assert triple["best"] is None
     assert triple["worst"] is None
     assert triple["last"] is None
@@ -293,7 +293,7 @@ def test_rollup_last_is_the_final_point_even_when_none():
     rt.rollup("b1", today=date(2026, 10, 20))
     
     row = rt.history_for("b1", "q")
-    triple = row["daily"][0][1]
+    triple = row["daily"][0]
     assert triple["best"] == 3
     assert triple["worst"] == 5
     assert triple["last"] is None
@@ -305,15 +305,15 @@ def test_rollup_reroll_with_earlier_stale_point_widens_but_preserves_last():
     rt.rollup("b1", today=date(2026, 10, 20))
     
     row = rt.history_for("b1", "q")
-    original_at = row["daily"][0][1]["at"]
-    original_last = row["daily"][0][1]["last"]
+    original_at = row["daily"][0]["at"]
+    original_last = row["daily"][0]["last"]
     
     # Now discover an earlier point that wasn't included before (simulating backfill)
     rt.append_history("b1", [_result("q", 9)], [], now=_at(1, 8))
     rt.rollup("b1", today=date(2026, 10, 20))
     
     row = rt.history_for("b1", "q")
-    triple = row["daily"][0][1]
+    triple = row["daily"][0]
     assert triple["best"] == 5
     assert triple["worst"] == 9  # widened
     assert triple["last"] == original_last  # unchanged
@@ -326,14 +326,14 @@ def test_rollup_reroll_with_later_stale_point_updates_last_and_at():
     rt.rollup("b1", today=date(2026, 10, 20))
     
     row = rt.history_for("b1", "q")
-    original_at = row["daily"][0][1]["at"]
+    original_at = row["daily"][0]["at"]
     
     # Now discover a later point for the same day
     rt.append_history("b1", [_result("q", 3)], [], now=_at(1, 16))
     rt.rollup("b1", today=date(2026, 10, 20))
     
     row = rt.history_for("b1", "q")
-    triple = row["daily"][0][1]
+    triple = row["daily"][0]
     assert triple["best"] == 3
     assert triple["worst"] == 5
     assert triple["last"] == 3  # updated to later point
@@ -348,7 +348,7 @@ def test_rollup_last_is_chronologically_final_when_points_appended_out_of_order(
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    triple = row["daily"][0][1]
+    triple = row["daily"][0]
     assert triple["best"] == 3
     assert triple["worst"] == 9
     assert triple["last"] == 3  # hour 16 is chronologically last
@@ -361,14 +361,14 @@ def test_rollup_reroll_with_equal_at_replaces_last_and_at():
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    original_at = row["daily"][0][1]["at"]
+    original_at = row["daily"][0]["at"]
 
     # Append new point at exactly the same hour (simulating backfill with same timestamp)
     rt.append_history("b1", [_result("q", 7)], [], now=_at(1, 12))
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    triple = row["daily"][0][1]
+    triple = row["daily"][0]
     assert triple["last"] == 7  # replaced with new observation at same hour
     assert triple["at"] == original_at  # same hour
 
@@ -383,7 +383,7 @@ def test_rollup_rival_last_is_chronologically_final():
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    rival_triple = row["rivals"]["rival.com"]["daily"][0][1]
+    rival_triple = row["rivals"]["rival.com"]["daily"][0]
     assert rival_triple["best"] == 8
     assert rival_triple["worst"] == 12
     assert rival_triple["last"] == 8  # hour 16 is chronologically last
@@ -396,7 +396,7 @@ def test_rollup_rival_reroll_with_equal_at_replaces_last():
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    original_at = row["rivals"]["rival.com"]["daily"][0][1]["at"]
+    original_at = row["rivals"]["rival.com"]["daily"][0]["at"]
 
     # Append new rival point at exactly the same hour
     top = [{"position": 3, "domain": "rival.com", "url": "", "title": ""}]
@@ -404,7 +404,7 @@ def test_rollup_rival_reroll_with_equal_at_replaces_last():
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    rival_triple = row["rivals"]["rival.com"]["daily"][0][1]
+    rival_triple = row["rivals"]["rival.com"]["daily"][0]
     assert rival_triple["last"] == 3  # replaced with new observation
     assert rival_triple["at"] == original_at
 
@@ -471,16 +471,25 @@ def test_sweep_continues_past_a_query_that_raises(monkeypatch):
 
 def test_sweep_treats_an_empty_serp_as_an_error_not_an_unranked_result(monkeypatch):
     """A rate-limited provider returns nothing for everything; that is missing
-    data, and must not be written into history as a site-wide collapse."""
+    data, and must not be written into history as a site-wide collapse.
+
+    Two queries, one of which answers, so this stays a PARTIAL sweep — an
+    all-errored one is a total outage and deliberately writes no rows at all
+    (see ``test_a_total_outage_does_not_overwrite_the_previous_results``).
+    """
     from seo_geo_agent import competitors
-    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q", "ok"])
     monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
     rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
 
-    out = rt.sweep(_brand(), search=lambda query, **kw: _serp())
+    def search(query, **kw):
+        return _serp() if query == "q" else _serp((1, "https://lawpreptutorial.com/a"))
+
+    out = rt.sweep(_brand(), search=search)
 
     assert out["errors"] == 1
-    assert rt.latest_rows("b1")[0]["error"] == "empty SERP"
+    broken = next(r for r in rt.latest_rows("b1") if r["query"] == "q")
+    assert broken["error"] == "empty SERP"
     assert rt.history_for("b1", "q") is None
 
 
@@ -1030,3 +1039,287 @@ def test_rank_payload_shaped_call_loads_history_only_once(monkeypatch):
         f"Expected worklist(rows=...) to add no further load_list calls, got {call_count[0]} total."
     )
     assert len(worklist_rows) == 1
+
+
+# === Final whole-branch review fixes ======================================== #
+# C1 (Critical): Firestore rejects an array whose elements are arrays, so the
+# `[[hour, position], …]` encoding could never be written — every sweep paid
+# its full Serper bill and then died before storing any history. The shape is
+# pinned here offline; `test_rank_tracker_firestore.py` proves it against a
+# real emulator, which is the check that was missing.
+
+def test_history_points_are_maps_never_nested_arrays():
+    """Firestore: `InvalidArgument 400 Property array contains an invalid
+    nested entity`. No list in a history row may hold another list."""
+    top = [{"position": 2, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 9, top)], ["rival.com"], now=_at(1, 9))
+    rt.rollup("b1", today=date(2026, 10, 20))
+    rt.append_history("b1", [_result("q", 7, top)], ["rival.com"], now=_at(20, 9))
+
+    row = rt.history_for("b1", "q")
+
+    def assert_no_nested_arrays(value, path="history"):
+        if isinstance(value, list):
+            for n, item in enumerate(value):
+                assert not isinstance(item, (list, tuple)), \
+                    f"{path}[{n}] is an array inside an array — Firestore rejects this"
+                assert_no_nested_arrays(item, f"{path}[{n}]")
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                assert_no_nested_arrays(item, f"{path}.{key}")
+
+    assert_no_nested_arrays(row)
+    assert row["raw"] == [{"h": rt._epoch_hours(_at(20, 9)), "p": 7}]
+    assert row["daily"] == [{"d": "2026-10-01", "best": 9, "worst": 9, "last": 9,
+                             "at": rt._epoch_hours(_at(1, 9))}]
+    assert row["rivals"]["rival.com"]["daily"][0]["d"] == "2026-10-01"
+
+
+# M1: one null point per tracked rival per query per sweep was ~90% of a
+# measured 22.4 MB of history, storing only the fact that someone was absent.
+
+def test_a_rival_absent_from_the_serp_gets_no_point_at_all():
+    present = [{"position": 2, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 9, present)], ["rival.com", "ghost.com"], now=_at(1))
+    rt.append_history("b1", [_result("q", 9, [])], ["rival.com", "ghost.com"], now=_at(2))
+
+    row = rt.history_for("b1", "q")
+
+    # A rival that never showed up has no series at all...
+    assert "ghost.com" not in row["rivals"]
+    # ...and one that showed up once has exactly one point, not two.
+    assert row["rivals"]["rival.com"]["raw"] == [{"h": rt._epoch_hours(_at(1)), "p": 2}]
+
+
+# M2: a competitor stored as a pasted URL or with a "www." prefix matched no
+# SERP domain, so its series stayed empty and the tracked_rival scoring boost
+# never fired — with nothing anywhere reporting a problem.
+
+def test_a_rival_stored_as_a_url_still_matches_the_serp_domain():
+    top = [{"position": 2, "domain": "rival.com", "url": "", "title": ""}]
+    rt.append_history("b1", [_result("q", 9, top)], ["https://www.Rival.com/pricing?x=1"],
+                      now=_at(1))
+
+    row = rt.history_for("b1", "q")
+    assert list(row["rivals"]) == ["rival.com"]
+    assert row["rivals"]["rival.com"]["raw"][0]["p"] == 2
+
+
+def test_tracked_rivals_normalises_dedups_and_caps():
+    brand = _brand(competitors=["https://www.Rival.com/x", "rival.com", "RIVAL.com"]
+                   + [f"c{n}.com" for n in range(10)])
+    rivals = rt.tracked_rivals(brand)
+    assert rivals[0] == "rival.com"
+    assert len(rivals) == rt.MAX_RIVALS      # M7: same cap the sweep applies
+    assert len(set(rivals)) == len(rivals)   # deduped after normalisation
+
+
+def test_worklist_scores_a_tracked_rival_stored_as_a_url(monkeypatch):
+    """M7/M2 together: `worklist` read `competitors` uncapped and bare-
+    lowercased, so a rival the sweep had normalised away scored no boost."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("winnable", 100)), []))
+    _seed_latest([
+        {"query": "winnable", "position": 8, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+    ])
+
+    rows = rt.worklist(_brand(competitors=["https://www.Rival.com/"]))
+
+    assert rows[0]["tracked_rival"] is True
+
+
+def test_worklist_ignores_competitors_past_the_cap(monkeypatch):
+    """The sweep records history for the first MAX_RIVALS only; the worklist
+    must not award a tracked-rival boost to a ninth it knows nothing about."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("winnable", 100)), []))
+    _seed_latest([
+        {"query": "winnable", "position": 8, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "ninth.com", "url": "", "title": ""}]},
+    ])
+
+    over_cap = [f"c{n}.com" for n in range(rt.MAX_RIVALS)] + ["ninth.com"]
+    rows = rt.worklist(_brand(competitors=over_cap))
+
+    assert rows[0]["tracked_rival"] is False
+
+
+# I1: an all-errored sweep used to replace a real scoreboard with 200 unusable
+# rows; annotate_rows then skipped every one, so the panel said "Nothing
+# urgent…" over a total Serper outage.
+
+def test_a_total_outage_does_not_overwrite_the_previous_results(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q", "r"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    good = rt.sweep(_brand(), search=lambda query, **kw: _serp((3, "https://lawpreptutorial.com/x")),
+                    now=_at(5, 9))
+    assert good["ranked"] == 2
+
+    def every_query_fails(query, **kw):
+        raise RuntimeError("serper 429")
+
+    out = rt.sweep(_brand(), search=every_query_fails, now=_at(5, 11))
+
+    assert out["errors"] == 2 and out["ranked"] == 0
+    assert any("keeping the previous results" in n for n in out["notes"])
+    # The good scoreboard survives, rather than being replaced by two errors.
+    assert [r["position"] for r in rt.latest_rows("b1")] == [3, 3]
+    assert rt.latest_meta("b1")["errors"] == 0
+
+
+def test_a_partial_outage_still_writes_its_good_rows(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q", "r"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def half(query, **kw):
+        if query == "q":
+            raise RuntimeError("serper 429")
+        return _serp((3, "https://lawpreptutorial.com/x"))
+
+    out = rt.sweep(_brand(), search=half, now=_at(5, 9))
+
+    assert out["errors"] == 1 and out["ranked"] == 1
+    assert rt.latest_meta("b1")["errors"] == 1
+    assert sorted(r["query"] for r in rt.latest_rows("b1")) == ["q", "r"]
+
+
+# I4: a disabled or key-less sweep wrote nothing and `jobs.start` then marked
+# the job done, so "Run now" stayed enabled and the panel said nothing at all.
+
+def test_a_disabled_sweep_records_why_it_did_nothing(monkeypatch):
+    out = rt.sweep(_brand(rank_tracking_enabled=False), search=lambda q, **kw: _serp())
+
+    assert out["blocked"] == "disabled"
+    recorded = rt.last_sweep("b1")
+    assert recorded["blocked"] == "disabled"
+    assert "switched off" in recorded["notes"][0]
+
+
+def test_a_sweep_without_credentials_records_why_it_did_nothing(monkeypatch):
+    from seo_geo_agent import sources as src
+    monkeypatch.setattr(src, "brand_rank_available", lambda: False)
+
+    out = rt.sweep(_brand())
+
+    assert out["blocked"] == "credentials"
+    assert rt.last_sweep("b1")["blocked"] == "credentials"
+    assert "SEO_SERPER_API_KEY" in rt.last_sweep("b1")["notes"][0]
+
+
+def test_a_successful_sweep_records_a_clean_outcome(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((3, "https://lawpreptutorial.com/x")),
+             now=_at(5, 9))
+
+    recorded = rt.last_sweep("b1")
+    assert recorded["blocked"] is None and recorded["errors"] == 0 and recorded["notes"] == []
+
+
+# I5: `jobs.start` refuses a second MANUAL run in ONE process. The cron calls
+# sweep() inline without it, and Cloud Run holds several processes.
+
+def test_a_second_sweep_is_refused_while_one_holds_the_lease(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    with state.lease(rt.SWEEP_LOCK_DOC.format("b1"), ttl=60, wait=0):
+        out = rt.sweep(_brand(), search=lambda q, **kw: _serp((3, "https://x.com/a")),
+                       now=_at(5, 9))
+
+    assert out["blocked"] == "running"
+    assert out["checked"] == 0
+    # Nothing was charged: the whole point of refusing rather than queuing.
+    assert rt.budget_status("b1", today=date(2026, 10, 5))["searches"] == 0
+    assert rt.last_sweep("b1")["blocked"] == "running"
+
+
+def test_an_expired_sweep_lease_does_not_wedge_the_schedule(monkeypatch):
+    """A Cloud Run instance killed mid-sweep leaves its lease behind. It must
+    expire, or every later sweep is refused forever."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+    state.save(rt.SWEEP_LOCK_DOC.format("b1"), {"token": "dead-instance", "until": 1})
+
+    out = rt.sweep(_brand(), search=lambda q, **kw: _serp((3, "https://lawpreptutorial.com/a")),
+                   now=_at(5, 9))
+
+    assert out["blocked"] is None and out["ranked"] == 1
+
+
+def test_overlapping_append_history_calls_do_not_lose_a_point(monkeypatch):
+    """The lost update the reviewer forced by hand. Two writers read the same
+    chunk set, each merge their own query in, and the second save used to
+    overwrite the first — one query's whole history silently gone.
+
+    `jobs.save_list` is slowed so the two writers genuinely overlap; the lease
+    is what makes them take turns instead.
+    """
+    import threading
+    import time as _time
+    from seo_geo_agent import jobs as j
+
+    real_save = j.save_list
+
+    def slow_save(*args, **kwargs):
+        _time.sleep(0.15)
+        return real_save(*args, **kwargs)
+
+    monkeypatch.setattr(j, "save_list", slow_save)
+
+    start = threading.Barrier(2)
+
+    def writer(query: str):
+        start.wait()
+        rt.append_history("b1", [_result(query, 5)], [], now=_at(5, 9))
+
+    threads = [threading.Thread(target=writer, args=(q,)) for q in ("alpha", "beta")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert rt.history_for("b1", "alpha") is not None, "alpha's history was lost"
+    assert rt.history_for("b1", "beta") is not None, "beta's history was lost"
+
+
+# README C2-adjacent: 200 TLS handshakes per sweep, one per query.
+
+def test_the_sweep_shares_one_http_client_across_every_query(monkeypatch):
+    from seo_geo_agent import competitors
+    from seo_geo_agent import sources as src
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q", "r", "s"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+    monkeypatch.setattr(src, "brand_rank_available", lambda: True)
+
+    seen: list[object] = []
+
+    def fake_search(query, client=None, **kw):
+        seen.append(client)
+        return _serp((3, "https://lawpreptutorial.com/x"))
+
+    monkeypatch.setattr(src, "brand_rank_search", fake_search)
+
+    rt.sweep(_brand(), now=_at(5, 9))
+
+    assert len(seen) == 3
+    assert seen[0] is not None, "the sweep must pass a client, not let each call open its own"
+    assert all(c is seen[0] for c in seen), "every query must reuse the one connection pool"
