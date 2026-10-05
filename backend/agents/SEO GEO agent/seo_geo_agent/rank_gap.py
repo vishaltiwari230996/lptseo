@@ -77,10 +77,21 @@ def explain(brand: dict, query: str, fetch=None, llm=None, now=None) -> dict | N
         if not url:
             return None
         try:
-            return _facts(fetch(url))
+            page = fetch(url)
         except Exception as exc:  # noqa: BLE001 — a blocked page is a note, not a 500
             notes.append(f"{url}: {exc}"[:200])
             return None
+        # fetch_page does not raise on an HTTP-level failure — a 403, a 404,
+        # a timeout/connect error (status left at 0) — it hands back a normal
+        # PageFacts with status set and everything else empty. Treated as
+        # ordinary zeros, that is indistinguishable from a genuinely thin
+        # page and the LLM would confidently "explain" content that was never
+        # read. Anything other than 200 is unknown, not empty.
+        status = getattr(page, "status", 200)
+        if status != 200:
+            notes.append((f"{url}: HTTP {status}" if status else f"{url}: fetch failed")[:200])
+            return None
+        return _facts(page)
 
     ours = facts_for(row.get("url") or "")
     theirs = facts_for(leader["url"])
