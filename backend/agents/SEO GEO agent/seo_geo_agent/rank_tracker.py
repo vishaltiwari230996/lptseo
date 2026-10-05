@@ -538,17 +538,19 @@ def lost_ranking(brand_id: str, query: str, hours: int) -> bool:
     return _lost_ranking_from(row, hours)
 
 
-def worklist(brand: dict, limit: int = 10) -> list[dict]:
-    """Order the losing queries by how much a win is worth times how winnable it is.
+def annotate_rows(brand: dict) -> list[dict]:
+    """Every non-errored swept row, enriched with the week's movement, demand
+    and who (if anyone) outranks us.
 
-    Deliberately arithmetic rather than an LLM judgement: this list decides
-    where a person spends their week, so it has to be explainable, stable
-    between runs, and testable.
+    This used to live inline inside ``worklist()``, which computed exactly
+    this for every row and then threw ~190 of 200 away with a ``[:limit]``
+    slice. The full table needs the same numbers for every row, not just the
+    worklist's top 10, so the computation is factored out here and ``worklist``
+    below is now just a filter + sort + slice over this function's output.
     """
     brand_id = brand["id"]
     impressions = {_norm(q["query"]): int(q.get("impressions") or 0)
                    for q in (latest_pool(brand_id) or {}).get("queries", [])}
-    rivals = {d.lower() for d in (brand.get("competitors") or [])}
 
     # Load history once to avoid 200 redundant read()/load_list calls in the loop.
     history_by_query = {_norm(h["query"]): h for h in all_history(brand_id)}
@@ -560,21 +562,62 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
         position = result.get("position")
         top = result.get("top") or []
         above = [e for e in top if position is None or e["position"] < position]
-        leader = above[0] if above else None
-        if not leader:
-            continue  # nobody is beating us here
+        leader = above[0] if above else None  # None when nobody outranks us
 
         query_key = _norm(result["query"])
         shown = impressions.get(query_key, 0)
-        demand = max(1.0, math.log1p(shown))
-        tracked = leader["domain"] in rivals
-        # A rival we already profile is a gap we can actually analyse.
-        gap = 1.4 if tracked else 1.0
 
-        # Compute delta and dropout detection from loaded history.
         history_row = history_by_query.get(query_key)
         moved = _delta_from(history_row, hours=7 * 24)
         dropped = _lost_ranking_from(history_row, hours=7 * 24)
+
+        rows.append({
+            "query": result["query"],
+            "position": position,
+            "url": result.get("url", ""),
+            "top": top,
+            "checked_at": result.get("checked_at", ""),
+            "error": result.get("error"),
+            "impressions": shown,
+            "delta_7d": moved,
+            "dropped": dropped,
+            "leader": leader["domain"] if leader else None,
+            "leader_position": leader["position"] if leader else None,
+            "leader_url": leader["url"] if leader else None,
+        })
+    return rows
+
+
+def worklist(brand: dict, limit: int = 10, rows: list[dict] | None = None) -> list[dict]:
+    """Order the losing queries by how much a win is worth times how winnable it is.
+
+    Deliberately arithmetic rather than an LLM judgement: this list decides
+    where a person spends their week, so it has to be explainable, stable
+    between runs, and testable.
+
+    ``rows``, when given, must be ``annotate_rows(brand)``'s own output — the
+    caller (``_rank_payload``) already needs the full annotated table for its
+    own response and passes it straight through so history is not loaded a
+    second time for the same request. Left ``None`` (every existing caller
+    and test), this calls ``annotate_rows`` itself.
+    """
+    rivals = {d.lower() for d in (brand.get("competitors") or [])}
+    source = annotate_rows(brand) if rows is None else rows
+
+    out: list[dict] = []
+    for row in source:
+        leader = row["leader"]
+        if not leader:
+            continue  # nobody is beating us here
+
+        position = row["position"]
+        shown = row["impressions"]
+        moved = row["delta_7d"]
+        dropped = row["dropped"]
+        demand = max(1.0, math.log1p(shown))
+        tracked = leader in rivals
+        # A rival we already profile is a gap we can actually analyse.
+        gap = 1.4 if tracked else 1.0
 
         # A live regression outranks a long-standing weakness.
         # A dropout is also high-priority (band=1.0, trend=1.6).
@@ -588,13 +631,13 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
             band = _position_band(position)
             trend = 1.0
 
-        rows.append({
-            "query": result["query"],
+        out.append({
+            "query": row["query"],
             "position": position,
             "impressions": shown,
-            "leader": leader["domain"],
-            "leader_position": leader["position"],
-            "leader_url": leader["url"],
+            "leader": leader,
+            "leader_position": row["leader_position"],
+            "leader_url": row["leader_url"],
             "tracked_rival": tracked,
             "delta_7d": moved,
             "score": round(demand * band * gap * trend, 3),
@@ -602,8 +645,8 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
             "dropped": dropped,
         })
 
-    rows.sort(key=lambda r: -r["score"])
-    return rows[:limit]
+    out.sort(key=lambda r: -r["score"])
+    return out[:limit]
 
 
 def _reason(position, impressions, tracked, moved, dropped=False) -> str:

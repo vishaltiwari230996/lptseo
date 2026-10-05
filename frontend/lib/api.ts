@@ -3008,6 +3008,16 @@ export interface RankRow {
   checked_at: string;
   top: RankSerpEntry[];
   error: string | null;
+  /** The week's movement and who (if anyone) outranks us — computed for
+   *  every row, not just the worklist's top 10 (`annotate_rows` on the
+   *  backend). `leader*` is null when nobody is above us, including when we
+   *  rank #1 — that is a real "nothing to show", not missing data. */
+  impressions: number;
+  delta_7d: number | null;
+  dropped: boolean;
+  leader: string | null;
+  leader_position: number | null;
+  leader_url: string | null;
 }
 
 export interface RankWorklistRow {

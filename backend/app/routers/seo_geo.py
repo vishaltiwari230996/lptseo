@@ -829,10 +829,14 @@ def get_page_speed_page(brand_id: str, url: str, user=Depends(get_current_user))
 def _rank_payload(brand: dict) -> dict:
     brand_id = brand["id"]
     pool = seo_rank.latest_pool(brand_id) or {"queries": [], "notes": [], "sources_used": []}
+    # Annotated once and handed to worklist() so a single GET loads history
+    # once, not twice — worklist() would otherwise redo annotate_rows() (and
+    # its one all_history()/latest_rows() read) on top of the line below.
+    annotated = seo_rank.annotate_rows(brand)
     return {
-        "rows": seo_rank.latest_rows(brand_id),
+        "rows": annotated,
         "meta": seo_rank.latest_meta(brand_id),
-        "worklist": seo_rank.worklist(brand, limit=10),
+        "worklist": seo_rank.worklist(brand, limit=10, rows=annotated),
         "pool": {
             "size": len([q for q in pool["queries"] if q.get("active")]),
             "cap": seo_rank.MAX_POOL,

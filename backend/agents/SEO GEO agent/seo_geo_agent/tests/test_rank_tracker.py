@@ -926,3 +926,107 @@ def test_worklist_loads_history_once_not_per_row(monkeypatch):
     # trigger fresh history loads.
     assert call_count[0] <= 3, f"Expected ≤3 load_list calls, got {call_count[0]}. History was loaded once per row."
     assert len(rows) > 0  # Sanity check: worklist produced output
+
+
+# === annotate_rows() — Review Finding 3: every row, not just the worklist's
+#     top 10. worklist() used to compute impressions/delta_7d/leader* for
+#     every swept row and then discard all but the top `limit` with a slice.
+#     That work is now kept: annotate_rows() returns it for every row, and
+#     worklist() is a filter + sort + slice on top of it. ===
+
+def test_annotate_rows_includes_a_query_we_already_lead(monkeypatch):
+    """A query we rank #1 for has nobody above us — worklist() skips it with
+    `continue`, but the full table still needs this row, with leader* null
+    rather than a `top[0]` guess (there is no top[0] to guess from anyway)."""
+    _seed_latest([
+        {"query": "already won", "position": 1, "url": "", "error": None, "top": []},
+    ])
+
+    rows = rt.annotate_rows(_brand())
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["query"] == "already won"
+    assert row["position"] == 1
+    assert row["leader"] is None
+    assert row["leader_position"] is None
+    assert row["leader_url"] is None
+
+
+def test_annotate_rows_every_row_carries_delta_and_impressions(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("led", 100), ("leads", 50)), []))
+    _seed_latest([
+        {"query": "led", "position": 5, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+        {"query": "leads", "position": 1, "url": "", "error": None, "top": []},
+    ])
+
+    rows = rt.annotate_rows(_brand())
+
+    assert len(rows) == 2
+    for row in rows:
+        assert "delta_7d" in row
+        assert "impressions" in row
+        assert isinstance(row["impressions"], int)
+
+
+def test_annotate_rows_excludes_errored_rows():
+    _seed_latest([{"query": "broken", "position": None, "url": "",
+                   "error": "serper 429", "top": []}])
+    assert rt.annotate_rows(_brand()) == []
+
+
+def test_worklist_output_unchanged_when_fed_precomputed_rows(monkeypatch):
+    """`worklist(brand, rows=annotate_rows(brand))` — the shape `_rank_payload`
+    uses to avoid loading history twice — must produce the exact same result
+    as the default `worklist(brand)` call every existing test exercises."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("winnable", 5000), ("already won", 9000)), []))
+    _seed_latest([
+        {"query": "winnable", "position": 8, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "https://rival.com/a", "title": ""}]},
+        {"query": "already won", "position": 1, "url": "", "error": None, "top": []},
+    ])
+
+    direct = rt.worklist(_brand())
+    annotated = rt.annotate_rows(_brand())
+    via_rows = rt.worklist(_brand(), rows=annotated)
+
+    assert via_rows == direct
+    assert [r["query"] for r in via_rows] == ["winnable"]
+
+
+def test_rank_payload_shaped_call_loads_history_only_once(monkeypatch):
+    """Pins the load-once invariant across the exact shape `_rank_payload` now
+    uses: one `annotate_rows()` call, whose result is handed to `worklist()`
+    rather than letting `worklist()` redo its own `annotate_rows()` (and the
+    history read inside it) a second time for the same request."""
+    from seo_geo_agent import competitors, jobs as j
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(("q", 100)), []))
+    _seed_latest([
+        {"query": "q", "position": 9, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+    ])
+
+    call_count = [0]
+    original_load_list = j.load_list
+    def counting_load_list(*args, **kwargs):
+        call_count[0] += 1
+        return original_load_list(*args, **kwargs)
+    monkeypatch.setattr(j, "load_list", counting_load_list)
+
+    brand = _brand()
+    annotated = rt.annotate_rows(brand)          # 2 load_list calls (all_history, latest_rows)
+    worklist_rows = rt.worklist(brand, rows=annotated)  # must add 0 more
+
+    assert call_count[0] <= 3, (
+        f"Expected worklist(rows=...) to add no further load_list calls, got {call_count[0]} total."
+    )
+    assert len(worklist_rows) == 1

@@ -47,10 +47,27 @@ afterEach(cleanup);
 function doc(over: Partial<RankTrackerDoc> = {}): RankTrackerDoc {
   return {
     rows: [
+      // Annotated fields (impressions/delta_7d/dropped/leader*) mirror the
+      // worklist entry below for the same query — `annotate_rows` on the
+      // backend computes these for every row, worklist() only filters/sorts.
       { query: "clat coaching", position: 8, url: "", checked_at: "", error: null,
-        top: [{ position: 1, domain: "rival.com", url: "https://rival.com/a", title: "" }] },
-      { query: "clat syllabus", position: 2, url: "", checked_at: "", error: null, top: [] },
-      { query: "clat fees", position: null, url: "", checked_at: "", error: null, top: [] },
+        top: [{ position: 1, domain: "rival.com", url: "https://rival.com/a", title: "" }],
+        impressions: 5000, delta_7d: -3, dropped: false,
+        leader: "rival.com", leader_position: 1, leader_url: "https://rival.com/a" },
+      // Position 2, nobody above us — leader* is genuinely null (not "no
+      // data"), and not on the worklist, yet still carries a real Δ7d from
+      // annotate_rows — the full table must show it directly, no `top[0]`
+      // fallback and no dash standing in for data that exists.
+      { query: "clat syllabus", position: 2, url: "", checked_at: "", error: null, top: [],
+        impressions: 800, delta_7d: 1, dropped: false,
+        leader: null, leader_position: null, leader_url: null },
+      // Unranked (position null) — the backend only ever reports delta_7d for
+      // a currently-ranked row, so this one is null, same invariant as a real
+      // `annotate_rows` row. `leader` can still be set: when we don't rank at
+      // all, whoever sits at #1 is "above us" by definition.
+      { query: "clat fees", position: null, url: "", checked_at: "", error: null, top: [],
+        impressions: 200, delta_7d: null, dropped: false,
+        leader: "other.com", leader_position: 1, leader_url: "https://other.com/x" },
     ],
     meta: { at: "2026-10-05T09:00:00+00:00", ranked: 3, errors: 0, rivals: ["rival.com"], count: 3 },
     worklist: [{ query: "clat coaching", position: 8, impressions: 5000, leader: "rival.com",
@@ -173,5 +190,123 @@ describe("RankTrackerView", () => {
     expect(screen.queryByText(/^0$/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/couldn.t read/i).length).toBeGreaterThan(0);
     expect(screen.getByText("2400")).toBeInTheDocument();
+  });
+
+  // Review Finding 1 (Important): loadHistory had no out-of-order guard —
+  // open a slow row, then a fast one, and the slow reply used to land last
+  // and silently repaint the drawer with the wrong query's chart under the
+  // fast query's still-showing title.
+  it("discards a stale history response for a row the drawer has moved on from", async () => {
+    seoRankTracker.mockResolvedValue(doc());
+    let resolveSlow!: (v: unknown) => void;
+    const slow = new Promise((res) => { resolveSlow = res; });
+    seoRankHistory.mockImplementation((_id: string, query: string) =>
+      query === "clat coaching"
+        ? slow
+        : Promise.resolve({ history: { query, raw: [], daily: [], rivals: {} } }));
+
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "clat coaching" })); // slow — still in flight
+    fireEvent.click(screen.getByRole("button", { name: "clat fees" }));     // fast — resolves immediately
+
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("clat fees"));
+    await waitFor(() => expect(screen.getByText(/no history yet/i)).toBeInTheDocument());
+
+    // The row the user left behind now resolves...
+    resolveSlow({
+      history: {
+        query: "clat coaching", raw: [],
+        daily: [["2026-09-01", { best: 1, worst: 1, last: 1, at: 1 }]], rivals: {},
+      },
+    });
+    // ...and must be discarded: still "clat fees", still the empty state —
+    // never silently repainted with "clat coaching"'s chart underneath it.
+    await waitFor(() => expect(screen.getByRole("dialog")).toHaveTextContent("clat fees"));
+    expect(screen.queryByText(/2026-09-01/)).not.toBeInTheDocument();
+    expect(screen.getByText(/no history yet/i)).toBeInTheDocument();
+  });
+
+  // Review Finding 2 (Important): build_pool()/rebuild_rank_pool() never call
+  // charge() — rebuilding the pool costs zero Serper credits. The budget-
+  // exhausted disable belongs to Run now alone.
+  it("does not disable Rebuild pool when the search budget is exhausted", async () => {
+    seoRankTracker.mockResolvedValue(
+      doc({ budget: { date: "2026-10-05", searches: 3000, cap: 3000, remaining: 0 } }));
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/daily search budget/i)).toBeInTheDocument());
+
+    expect(screen.getByRole("button", { name: /rebuild pool/i })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: /run now/i })).toBeDisabled();
+  });
+
+  // Review Finding 3 (Important): `annotate_rows` now computes delta_7d,
+  // impressions and leader* for every row, not just the worklist's top 10 —
+  // the full table must read them directly, never fall back to a dash for a
+  // row that simply isn't on the worklist.
+  it("renders a real Δ7d value for a row that isn't on the worklist, not a dash", async () => {
+    seoRankTracker.mockResolvedValue(doc());
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    const syllabusRow = screen.getByText("clat syllabus").closest("tr") as HTMLElement;
+    expect(within(syllabusRow).getByText("+1")).toBeInTheDocument();
+    // And the row's own Leader column — nobody is above it, which is a real
+    // answer now, not a `top[0]` guess.
+    expect(within(syllabusRow).getByText("—")).toBeInTheDocument();
+  });
+
+  // Review Finding 4 (Minor): gapBusy was a single shared boolean, so loading
+  // one row's gap disabled every other row's "Why?" button. briefBusy in the
+  // same file is already keyed per query — this matches it.
+  it("disables only the clicked row's Why? button while its gap loads", async () => {
+    let resolveGap!: (v: unknown) => void;
+    seoRankTracker.mockResolvedValue(doc({
+      worklist: [
+        { query: "clat coaching", position: 8, impressions: 5000, leader: "rival.com",
+          leader_position: 1, leader_url: "https://rival.com/a", tracked_rival: true,
+          delta_7d: -3, score: 12.1, reason: "#8 — striking distance", dropped: false },
+        { query: "clat fees", position: null, impressions: 200, leader: "other.com",
+          leader_position: 1, leader_url: "https://other.com/x", tracked_rival: false,
+          delta_7d: null, score: 4, reason: "not ranking", dropped: false },
+      ],
+    }));
+    seoRankGap.mockImplementation(() => new Promise((res) => { resolveGap = res; }));
+
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(/#8 — striking distance/i)).toBeInTheDocument());
+
+    const whyButtons = screen.getAllByRole("button", { name: /^why\?$/i });
+    expect(whyButtons).toHaveLength(2);
+    fireEvent.click(whyButtons[0]);
+
+    await waitFor(() => expect(whyButtons[0]).toBeDisabled());
+    expect(whyButtons[1]).not.toBeDisabled();
+
+    resolveGap({
+      gap: {
+        query: "clat coaching", our_url: "", our_position: 8, their_url: "https://rival.com/a",
+        their_domain: "rival.com", their_position: 1,
+        metrics: {
+          words: { ours: 1, theirs: 1 }, headings: { ours: 1, theirs: 1 },
+          schema: { ours: [], theirs: [] }, questions: { ours: 1, theirs: 1 },
+        },
+        narrative: "x", notes: [], at: "2026-10-05T09:00:00+00:00", cached: false,
+      },
+    });
+    await waitFor(() => expect(whyButtons[0]).not.toBeDisabled());
+  });
+
+  // Review Finding 4 (Minor): the full table needs a real <table> with
+  // <th scope="col"> on every header cell for screen-reader navigation.
+  it("marks every table header cell with scope=\"col\"", async () => {
+    seoRankTracker.mockResolvedValue(doc());
+    render(<RankTrackerView brandId="b1" isCreator onToast={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("table")).toBeInTheDocument());
+
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers.length).toBeGreaterThan(0);
+    headers.forEach((h) => expect(h).toHaveAttribute("scope", "col"));
   });
 });

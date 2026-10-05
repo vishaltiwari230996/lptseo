@@ -16,10 +16,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  isAbortError,
+  isAbortError, RequestSequence,
   seoBuildBrief, seoRankGap, seoRankHistory, seoRankPoolRebuild, seoRankSweep, seoRankTracker,
   type RankDaily, type RankGap, type RankHistory, type RankRow, type RankTrackerDoc,
-  type RankWorklistRow,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
@@ -175,11 +174,21 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
   const [history, setHistory] = useState<RankHistory | null>(null);
   const [historyError, setHistoryError] = useState<string | null>(null);
   const [gap, setGap] = useState<RankGap | null>(null);
-  const [gapBusy, setGapBusy] = useState(false);
+  const [gapBusy, setGapBusy] = useState<string | null>(null);
   const [sweepBusy, setSweepBusy] = useState(false);
   const [poolBusy, setPoolBusy] = useState(false);
   const [briefBusy, setBriefBusy] = useState<string | null>(null);
   const drawerRef = useRef<HTMLDivElement | null>(null);
+
+  // The drawer loads two different entities (history, gap) into the same
+  // on-screen slot. Without a supersession guard, opening a slow row and then
+  // a fast one lets the slow response land last and overwrite the fast row's
+  // data under the fast row's still-showing title — `load()` above already
+  // guards its own single entity the same way; these need their own because
+  // either can be in flight independently of the other.
+  const historySeq = useRef(new RequestSequence());
+  const gapSeq = useRef(new RequestSequence());
+  useEffect(() => () => { historySeq.current.cancel(); gapSeq.current.cancel(); }, []);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -213,11 +222,14 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
   }, [open]);
 
   async function loadHistory(query: string) {
+    const ticket = historySeq.current.start();
     setHistoryError(null);
     try {
-      const r = await seoRankHistory(brandId, query);
+      const r = await seoRankHistory(brandId, query, { signal: ticket.signal });
+      if (!historySeq.current.isCurrent(ticket)) return; // a newer row was opened meanwhile
       setHistory(r.history);
     } catch (e) {
+      if (isAbortError(e) || !historySeq.current.isCurrent(ticket)) return;
       setHistoryError(errMsg(e, "History could not be loaded"));
     }
   }
@@ -231,20 +243,25 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
   }
 
   function closeDrawer() {
+    historySeq.current.cancel();
+    gapSeq.current.cancel();
     setOpen(null);
     setHistory(null);
     setGap(null);
   }
 
   async function loadGap(query: string) {
-    setGapBusy(true);
+    const ticket = gapSeq.current.start();
+    setGapBusy(query);
     try {
       const r = await seoRankGap(brandId, query);
+      if (!gapSeq.current.isCurrent(ticket)) return; // the drawer moved on to a different row
       setGap(r.gap);
     } catch (e) {
+      if (!gapSeq.current.isCurrent(ticket)) return;
       onToast(errMsg(e, "Could not build the gap analysis"), "error");
     } finally {
-      setGapBusy(false);
+      setGapBusy((q) => (q === query ? null : q));
     }
   }
 
@@ -291,12 +308,6 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
       setPoolBusy(false);
     }
   }
-
-  const worklistByQuery = useMemo(() => {
-    const m = new Map<string, RankWorklistRow>();
-    for (const w of doc?.worklist ?? []) m.set(w.query, w);
-    return m;
-  }, [doc]);
 
   const rows = useMemo(
     () => (doc?.rows ?? []).filter((r) => !r.error && matches(r, filter)),
@@ -346,7 +357,10 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                         onClick={() => void runSweep()}>
                   <Icon name="refresh-cw" size={13} /> Run now
                 </button>
-                <button className="seo-btn" disabled={running || poolBusy || budgetExhausted}
+                {/* Rebuilding the pool merges query sources already in storage — it
+                    costs zero Serper credits (`build_pool` never calls `charge()`),
+                    so an exhausted search budget must not block it, only Run now. */}
+                <button className="seo-btn" disabled={running || poolBusy}
                         onClick={() => void rebuildPool()}>
                   Rebuild pool
                 </button>
@@ -378,7 +392,9 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                 <span className="seo-rank__row-reason">{w.reason}</span>
                 <span className="seo-rank__row-leader">{w.leader} #{w.leader_position}</span>
                 <span className="seo-rank__row-actions">
-                  <button className="seo-btn" disabled={gapBusy} onClick={() => whyGap(w.query)}>Why?</button>
+                  <button className="seo-btn" disabled={gapBusy === w.query} onClick={() => whyGap(w.query)}>
+                    Why?
+                  </button>
                   <button className="seo-btn" disabled={briefBusy === w.query} onClick={() => void brief(w.query)}>
                     Brief
                   </button>
@@ -400,16 +416,18 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
             <table className="seo-rank__table">
               <thead>
                 <tr>
-                  <th>Query</th><th>Our rank</th><th>Δ7d</th><th>Leader</th><th>Impressions</th>
+                  <th scope="col">Query</th><th scope="col">Our rank</th><th scope="col">Δ7d</th>
+                  <th scope="col">Leader</th><th scope="col">Impressions</th>
                 </tr>
               </thead>
               <tbody>
+                {/* Every field below comes straight off the row — `annotate_rows`
+                    on the backend computes delta_7d, leader fields and impressions for all
+                    200 rows, not just the worklist's top 10, so there is no
+                    `top[0]` fallback left here. A row with no leader (we rank
+                    #1) truthfully shows "—", not a guess. */}
                 {rows.map((r) => {
-                  const w = worklistByQuery.get(r.query);
-                  const delta = w?.delta_7d ?? null;
-                  const leaderDomain = w?.leader ?? r.top[0]?.domain ?? null;
-                  const leaderPos = w?.leader_position ?? r.top[0]?.position ?? null;
-                  const impressions = w?.impressions ?? null;
+                  const delta = r.delta_7d;
                   return (
                     <tr key={r.query}>
                       <td><button className="seo-rank__row-link" onClick={() => openDrawer(r.query)}>{r.query}</button></td>
@@ -417,8 +435,8 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
                       <td className={`num${delta != null ? (delta > 0 ? " seo-rank__delta--up" : delta < 0 ? " seo-rank__delta--down" : "") : ""}`}>
                         {delta == null ? "—" : delta > 0 ? `+${delta}` : `${delta}`}
                       </td>
-                      <td>{leaderDomain ? `${leaderDomain}${leaderPos != null ? ` #${leaderPos}` : ""}` : "—"}</td>
-                      <td className="num">{impressions != null ? fmt(impressions) : "—"}</td>
+                      <td>{r.leader ? `${r.leader}${r.leader_position != null ? ` #${r.leader_position}` : ""}` : "—"}</td>
+                      <td className="num">{r.impressions ? fmt(r.impressions) : "—"}</td>
                     </tr>
                   );
                 })}
@@ -473,8 +491,8 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
             )}
 
             {!gap && (
-              <button className="seo-btn" disabled={gapBusy} onClick={() => void loadGap(open)}>
-                {gapBusy ? "Comparing…" : "Why? — compare against the leader"}
+              <button className="seo-btn" disabled={gapBusy === open} onClick={() => void loadGap(open)}>
+                {gapBusy === open ? "Comparing…" : "Why? — compare against the leader"}
               </button>
             )}
             {gap && <GapCard gap={gap} />}
