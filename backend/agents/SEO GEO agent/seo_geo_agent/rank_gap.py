@@ -70,7 +70,7 @@ def explain(brand: dict, query: str, fetch=None, llm=None, now=None) -> dict | N
             return {**cached, "cached": True}
 
     fetch = fetch or sources.fetch_page
-    llm = llm or (lambda system, prompt: sources.llm_text(system, prompt, agent_id="a2"))
+    llm = llm or (lambda system, prompt: sources.llm_text(system, prompt, agent_id="a2", fast=False))
     notes: list[str] = []
 
     def facts_for(url: str) -> dict | None:

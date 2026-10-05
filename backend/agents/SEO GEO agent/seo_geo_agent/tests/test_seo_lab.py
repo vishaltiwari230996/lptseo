@@ -132,7 +132,7 @@ def serp_with(pos_ours):
 
 
 def test_tracked_keywords_fall_back_to_site_review_seeds(monkeypatch):
-    monkeypatch.setattr(site_brain.sources, "llm_json", lambda s, p: REVIEW_JSON)
+    monkeypatch.setattr(site_brain.sources, "llm_json", lambda s, p, **kw: REVIEW_JSON)
     site_brain.expert_review(BRAND, {"brand_id": "b", "page_count": 1, "pages": [], "degraded": []})
     seedless = {**BRAND, "seeds": []}
     tracked = competitors.tracked_keywords(seedless)
@@ -410,7 +410,7 @@ def test_corpus_cache_skips_unchanged_pages(monkeypatch):
 
 
 def test_expert_review_todos_and_seeds(monkeypatch):
-    monkeypatch.setattr(site_brain.sources, "llm_json", lambda s, p: REVIEW_JSON)
+    monkeypatch.setattr(site_brain.sources, "llm_json", lambda s, p, **kw: REVIEW_JSON)
     corpus = {"brand_id": "b", "page_count": 2, "pages": [], "degraded": []}
     review = site_brain.expert_review(BRAND, corpus)
     assert review["positioning"].startswith("Virtual assistants")
@@ -429,7 +429,7 @@ def test_expert_review_todos_and_seeds(monkeypatch):
 
 
 def test_run_brand_merges_site_todos(monkeypatch):
-    monkeypatch.setattr(site_brain.sources, "llm_json", lambda s, p: REVIEW_JSON)
+    monkeypatch.setattr(site_brain.sources, "llm_json", lambda s, p, **kw: REVIEW_JSON)
     brand = insights.list_brands()[0]
     site_brain.expert_review(brand, {"brand_id": brand["id"], "page_count": 1, "pages": [], "degraded": []})
     run = insights.run_brand(brand, trigger="t")

@@ -201,6 +201,7 @@ def expert_review(brand: dict, corpus: dict) -> dict:
         raw = sources.llm_json(
             EXPERT_SYSTEM,
             f"CLIENT: {brand['name']} ({brand['domain']})\nSITE PAGES:\n{_digest(corpus)}",
+            fast=False,
         )
     except CredentialMissing as exc:
         raise CredentialMissing(f"Site review needs the AI model: {exc}") from exc

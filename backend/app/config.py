@@ -118,10 +118,10 @@ class Settings(BaseSettings):
     # brand persona compilation, creative-type decision, and master-prompt
     # synthesis. A top-tier model is important for faithfully preserving brand
     # detail and making good art-direction calls.
-    openrouter_model: str = "anthropic/claude-opus-4.6"
+    openrouter_model: str = "anthropic/claude-opus-5"
     # Fast/cheap model for trivial parsing (extracting aspect ratio/brief from
     # chat, guessing the official website URL). Quality is not critical here.
-    openrouter_fast_model: str = "anthropic/claude-sonnet-4.5"
+    openrouter_fast_model: str = "anthropic/claude-sonnet-5"
     # Image-output model. Nano Banana Pro (Gemini 3 Pro Image) is the default
     # because it accepts the real brand logo as a reference image AND follows the
     # detailed brand master prompt — giving on-brand, logo-accurate creatives.
