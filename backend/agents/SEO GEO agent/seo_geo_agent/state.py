@@ -3,12 +3,14 @@
 Doc ids use ``-`` separators only (``run-{brand}``, ``todos-{brand}``, ``brands``)
 so the local fallback can map them 1:1 to Windows-safe filenames.
 
-Three primitives: :func:`load` / :func:`save` / :func:`delete` for documents only
-one writer ever touches, and :func:`mutate` for the ones two callers can write at
-the same time. ``mutate`` lives here, next to the collection it transacts over,
-because a second implementation of "read-modify-write, atomically" is how one of
-the two ends up non-transactional; ``final_geo_agent.geo_store`` — which is where
-this code was written, for the GEO spend counters — now forwards to it.
+Four primitives: :func:`load` / :func:`save` / :func:`delete` for documents only
+one writer ever touches, :func:`mutate` for the ones two callers can write at
+the same time, and :func:`lease` for a critical section that spans *several*
+documents and so cannot be one transaction. ``mutate`` lives here, next to the
+collection it transacts over, because a second implementation of
+"read-modify-write, atomically" is how one of the two ends up
+non-transactional; ``final_geo_agent.geo_store`` — which is where this code was
+written, for the GEO spend counters — now forwards to it.
 """
 from __future__ import annotations
 
@@ -16,8 +18,10 @@ import json
 import os
 import threading
 import time
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 _COLLECTION = "seo_geo"
 
@@ -192,3 +196,69 @@ def mutate(doc_id: str, change: Callable[[dict], tuple[dict, Any]]) -> Any:
         new_doc, result = change(load(doc_id) or {})
         save(doc_id, new_doc)
         return result
+
+
+class Busy(RuntimeError):
+    """Raised by :func:`lease` when another holder still owns the name."""
+
+
+@contextmanager
+def lease(doc_id: str, *, ttl: float = 300.0, wait: float = 0.0,
+          poll: float = 0.25) -> Iterator[str]:
+    """Exclusive, self-expiring hold on a NAME, for a critical section that
+    spans more than one document.
+
+    :func:`mutate` is the right tool for one document and the wrong tool for
+    several. The rank tracker's history is chunked across a manifest plus N
+    chunk documents (see ``jobs.save_list``), so "read every chunk, merge the
+    new points in, write every chunk back" cannot be expressed as a single
+    Firestore transaction — and two writers interleaving there silently lose
+    points, which is the one thing a history is for. This serialises them
+    instead: take the lease, do the read-modify-write, release it.
+
+    Multi-instance safe, which is the reason it is a document rather than a
+    ``threading.Lock``: Cloud Run runs several containers, so a process-local
+    registry (``jobs._RUNNING``) serialises nothing between them.
+
+    The lease EXPIRES. A holder that is SIGKILLed mid-sweep — exactly what a
+    Cloud Run instance shutdown does — must not wedge every later sweep
+    forever, so a waiter that finds an expired lease takes it. ``ttl`` must
+    therefore exceed the critical section's worst-case runtime.
+
+    ``wait=0`` (the default) means "refuse rather than queue": raise
+    :class:`Busy` at once. A caller that only wants one of two concurrent runs
+    to happen at all wants this; a caller that wants both to happen, one after
+    the other, passes a ``wait``.
+
+    Acquisition is itself a ``mutate``, so two waiters racing for a free lease
+    cannot both win.
+    """
+    token = uuid.uuid4().hex
+    deadline = time.monotonic() + max(0.0, wait)
+
+    def _acquire(current: dict) -> tuple[dict, bool]:
+        now = time.time()
+        held_until = float(current.get("until") or 0)
+        if current.get("token") and held_until > now:
+            return current, False
+        return {"token": token, "until": now + ttl}, True
+
+    while True:
+        if mutate(doc_id, _acquire):
+            break
+        if time.monotonic() >= deadline:
+            raise Busy(f"{doc_id} is held by another run")
+        time.sleep(poll)
+
+    try:
+        yield token
+    finally:
+        # Only the holder clears it. A lease that already expired and was taken
+        # by someone else must not be released out from under its new owner.
+        def _release(current: dict) -> tuple[dict, None]:
+            return ({} if current.get("token") == token else current), None
+
+        try:
+            mutate(doc_id, _release)
+        except Exception:  # noqa: BLE001 — a stuck lease expires on its own
+            pass
