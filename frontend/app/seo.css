@@ -716,3 +716,128 @@ a.seo-pages__path:hover { color: var(--green-500); }
   margin-top: var(--space-4);
   padding-left: var(--space-5);
 }
+
+/* Rank tracker (Task 11) ---------------------------------------------------
+   New vocabulary only: the worklist row, the filter pills, the full table and
+   the history drawer. Shapes follow what already exists in this file
+   (`.seo-pool__row`'s dense-row grid, `.seo-chip`/`.seo-btn` for pills and
+   actions, `.seo-degraded`/`.seo-empty` for load/empty states) rather than
+   inventing new primitives; nothing already in this file is restyled. */
+
+.seo-rank__head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.seo-rank__head-meta {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: baseline;
+  font: 500 12.5px/1.4 var(--font-sans); color: var(--text-secondary);
+}
+.seo-rank__head-meta strong { color: var(--text-primary); font-weight: 650; }
+.seo-rank__head-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.seo-rank__job {
+  display: inline-flex; align-items: center; gap: 8px;
+  font: 500 12.5px/1.4 var(--font-sans); color: var(--text-secondary);
+}
+.seo-rank__job-spin {
+  width: 11px; height: 11px; border-radius: 999px;
+  border: 2px solid var(--brand-border); border-top-color: var(--brand);
+  animation: seo-rank-spin 0.8s linear infinite;
+}
+@keyframes seo-rank-spin { to { transform: rotate(1turn); } }
+
+.seo-rank__worklist { display: grid; gap: 8px; margin-top: 14px; }
+.seo-rank__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) auto minmax(0, 2fr) minmax(0, 1.1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  font: 450 13px/1.45 var(--font-sans);
+  min-width: 0;
+}
+.seo-rank__row-query { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.seo-rank__row-pos { font: 600 12.5px/1 var(--font-mono); white-space: nowrap; }
+.seo-rank__row-reason { color: var(--text-secondary); min-width: 0; overflow-wrap: anywhere; }
+.seo-rank__row-leader { font: 500 12px/1.3 var(--font-mono); color: var(--text-tertiary); white-space: nowrap; }
+.seo-rank__row-actions { display: flex; gap: 6px; }
+
+.seo-rank__filters { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.seo-rank__filter {
+  font: 600 12px/1 var(--font-sans);
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.seo-rank__filter:hover { background: var(--surface-hover); }
+.seo-rank__filter--on { color: var(--text-primary); border-color: var(--brand); background: var(--brand-bg); }
+
+.seo-rank__table-wrap {
+  overflow-x: auto; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg);
+  max-width: 100%; margin-top: 4px;
+}
+.seo-rank__table { width: 100%; border-collapse: collapse; font: 450 13px/1.45 var(--font-sans); }
+.seo-rank__table th {
+  position: sticky; top: 0; text-align: left;
+  font: 600 11.5px/1.3 var(--font-sans); color: var(--text-tertiary);
+  background: var(--surface-sunken); white-space: nowrap;
+}
+.seo-rank__table td, .seo-rank__table th { padding: 9px 12px; border-bottom: 1px solid var(--border-subtle); }
+.seo-rank__table tr:last-child td { border-bottom: none; }
+.seo-rank__table td.num, .seo-rank__table th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seo-rank__row-link {
+  background: none; border: none; padding: 0; cursor: pointer;
+  font: 600 13px/1.4 var(--font-sans); color: var(--text-primary); text-align: left;
+}
+.seo-rank__row-link:hover { color: var(--brand); text-decoration: underline; }
+.seo-rank__row-link:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.seo-rank__delta--up { color: var(--green-600); font-weight: 600; }
+.seo-rank__delta--down { color: var(--red-600); font-weight: 600; }
+
+.seo-rank__drawer-backdrop {
+  position: fixed; inset: 0; background: color-mix(in srgb, black 45%, transparent);
+  display: flex; justify-content: flex-end; z-index: 40;
+}
+.seo-rank__drawer {
+  width: min(480px, 100%); height: 100%; overflow-y: auto;
+  background: var(--surface-card); border-left: 1px solid var(--border);
+  padding: 20px; display: grid; gap: 16px; align-content: start;
+}
+.seo-rank__drawer:focus-visible { outline: none; }
+.seo-rank__drawer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.seo-rank__drawer-close {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: none; border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 6px 10px; cursor: pointer; font: 600 12px/1 var(--font-sans); color: var(--text-secondary);
+}
+.seo-rank__drawer-close:hover { background: var(--surface-hover); }
+
+.seo-rank__chart { width: 100%; height: auto; }
+.seo-rank__chart-gap { fill: var(--text-tertiary); }
+.seo-rank__chart-note { font: 500 12px/1.5 var(--font-sans); color: var(--text-tertiary); margin-top: 4px; }
+
+.seo-rank__top-list { margin: 0; padding-left: 18px; display: grid; gap: 4px; font: 450 12.5px/1.5 var(--font-sans); }
+
+.seo-rank__gap { display: grid; gap: 10px; }
+.seo-rank__gap-narrative { margin: 0; font: 450 13.5px/1.6 var(--font-sans); color: var(--text-primary); }
+.seo-rank__gap-table { display: grid; gap: 4px; }
+.seo-rank__gap-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-subtle);
+  font: 450 12.5px/1.4 var(--font-sans);
+}
+.seo-rank__gap-row--head { font: 600 11px/1.3 var(--font-sans); color: var(--text-tertiary); border-bottom-color: var(--border); }
+.seo-rank__gap-label { color: var(--text-secondary); font-weight: 600; }
+.seo-rank__gap-unread { color: var(--text-tertiary); font-style: italic; }
+
+@media (max-width: 720px) {
+  .seo-rank__row { grid-template-columns: minmax(0, 1fr) auto; row-gap: 6px; }
+  .seo-rank__gap-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
