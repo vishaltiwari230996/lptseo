@@ -139,14 +139,45 @@ def test_tracked_keywords_fall_back_to_site_review_seeds(monkeypatch):
     assert "legal virtual assistant" in tracked  # from the site review's suggested_seeds
 
 
+def _seed_rank_tracker_latest(brand_id, position, at):
+    """Stand in for a rank_tracker sweep: writes the chunked-list shape
+    rank_snapshot now projects from (rank_tracker.latest_rows/latest_meta)."""
+    from seo_geo_agent import jobs, rank_tracker
+
+    jobs.save_list(rank_tracker.LATEST_PREFIX.format(brand_id), [
+        {"query": "legal virtual assistant", "position": position, "url": "https://x.com/page",
+         "error": None,
+         "top": [{"position": 1, "domain": "comp.com", "url": "https://comp.com/p1", "title": "Comp"},
+                 {"position": position, "domain": "x.com", "url": "https://x.com/page", "title": "Us"}]},
+    ], meta={"at": at, "ranked": 1, "errors": 0, "rivals": []})
+
+
 def test_rank_snapshot_and_shifts():
-    competitors.rank_snapshot(BRAND, search=lambda q: serp_with(5))
-    competitors.rank_snapshot(BRAND, search=lambda q: serp_with(3))
+    """rank_shifts compares the two latest calendar-day snapshots; rank_snapshot
+    now builds those by projecting rank_tracker's latest sweep rather than
+    running its own, so two sweeps on different days must still produce two
+    distinct, ordered snapshot entries rank_shifts can diff."""
+    _seed_rank_tracker_latest("b", 5, "2026-10-03T09:00:00+00:00")
+    competitors.rank_snapshot(BRAND)
+    _seed_rank_tracker_latest("b", 3, "2026-10-04T09:00:00+00:00")
+    doc = competitors.rank_snapshot(BRAND)
+
     shifts = competitors.rank_shifts("b")
     assert shifts[0]["position"] == 3 and shifts[0]["previous"] == 5 and shifts[0]["delta"] == 2
-    doc = competitors.rank_snapshot(BRAND, search=lambda q: serp_with(3))
     assert "comp.com" in doc["suggested_competitors"]
     assert "x.com" not in doc["suggested_competitors"]
+
+
+def test_rank_snapshot_dedupes_same_calendar_day():
+    """rank_tracker sweeps twelve times a day; rank_snapshot must replace that
+    day's entry on each projection, not append a duplicate every time it runs."""
+    _seed_rank_tracker_latest("dedupe-brand", 4, "2026-10-05T09:00:00+00:00")
+    competitors.rank_snapshot({**BRAND, "id": "dedupe-brand"})
+    _seed_rank_tracker_latest("dedupe-brand", 2, "2026-10-05T15:00:00+00:00")
+    doc = competitors.rank_snapshot({**BRAND, "id": "dedupe-brand"})
+
+    assert len(doc["snapshots"]) == 1
+    assert doc["snapshots"][0]["ranks"]["legal virtual assistant"]["position"] == 2
 
 
 def test_rank_tracking_pool_prioritizes_custom_then_auto_then_pool_terms(monkeypatch):
@@ -180,47 +211,6 @@ def test_add_custom_query_caps_total_stored_queries():
     # Re-adding (or no-op adding) an existing query is never blocked by the cap.
     existing = competitors.add_custom_query(brand_id, "query 0")
     assert len(existing) == competitors.MAX_CUSTOM_QUERIES
-
-
-def test_rank_snapshot_uses_brand_rank_search_not_serper_search(monkeypatch):
-    calls = {"brand_rank": 0, "serper": 0}
-
-    def fake_brand_rank(q, client=None):
-        calls["brand_rank"] += 1
-        return serp_with(1)
-
-    def fake_serper(q, client=None):
-        calls["serper"] += 1
-        return serp_with(1)
-
-    monkeypatch.setattr(competitors.sources, "brand_rank_available", lambda: True)
-    monkeypatch.setattr(competitors.sources, "brand_rank_search", fake_brand_rank)
-    monkeypatch.setattr(competitors.sources, "serper_search", fake_serper)
-
-    competitors.rank_snapshot({**BRAND, "id": "provider-check"})
-
-    assert calls["brand_rank"] > 0
-    assert calls["serper"] == 0
-
-
-def test_custom_query_reaches_snapshot_end_to_end(monkeypatch):
-    """rank_tracking_pool() including a custom query is not enough on its own —
-    prove the query actually reaches the SERP call and lands in the persisted
-    snapshot, the real end-to-end path a user's added query travels."""
-    seen = []
-
-    def fake_brand_rank(q, client=None):
-        seen.append(q)
-        return serp_with(1)
-
-    monkeypatch.setattr(competitors.sources, "brand_rank_available", lambda: True)
-    monkeypatch.setattr(competitors.sources, "brand_rank_search", fake_brand_rank)
-
-    competitors.add_custom_query("e2e-check", "my custom query")
-    doc = competitors.rank_snapshot({**BRAND, "id": "e2e-check"})
-
-    assert "my custom query" in seen
-    assert "my custom query" in doc["snapshots"][-1]["ranks"]
 
 
 def test_sitemap_watch_flags_new_content():
@@ -500,3 +490,26 @@ def test_draft_score_uses_brief_questions():
     names = {c["name"]: c["ok"] for c in scored["checks"]}
     assert names["Questions covered"] is True
     assert names["Entities covered"] is True
+
+
+def test_rank_snapshot_reads_rank_tracker_and_makes_no_serper_calls(monkeypatch):
+    """One rank engine. A second live sweep would double the Serper bill."""
+    from seo_geo_agent import competitors, jobs, rank_tracker
+
+    jobs.save_list(rank_tracker.LATEST_PREFIX.format("b1"), [
+        {"query": "clat coaching", "position": 4, "url": "https://lawpreptutorial.com/c",
+         "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "https://rival.com/a", "title": ""},
+                 {"position": 4, "domain": "lawpreptutorial.com", "url": "", "title": ""}]},
+    ], meta={"at": "2026-10-05T09:00:00+00:00", "ranked": 1, "errors": 0, "rivals": []})
+
+    def boom(*a, **kw):
+        raise AssertionError("rank_snapshot must not call a SERP provider")
+
+    monkeypatch.setattr(competitors.sources, "brand_rank_search", boom)
+    monkeypatch.setattr(competitors.sources, "serper_search", boom)
+
+    doc = competitors.rank_snapshot({"id": "b1", "domain": "lawpreptutorial.com"})
+
+    assert doc["snapshots"][-1]["ranks"]["clat coaching"]["position"] == 4
+    assert "rival.com" in doc["suggested_competitors"]

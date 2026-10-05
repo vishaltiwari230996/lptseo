@@ -94,32 +94,50 @@ def remove_custom_query(brand_id: str, query: str) -> list[str]:
 
 
 def rank_snapshot(brand: dict, search=None) -> dict:
-    """Record where we rank today for every tracked keyword, and which domains
-    keep showing up above us (competitor discovery)."""
-    if search is None:
-        if not sources.brand_rank_available():
-            raise CredentialMissing("Serper key missing — rank tracking needs live SERPs")
-        search = sources.brand_rank_search
+    """Project rank_tracker's latest run into this module's snapshot shape.
+
+    This used to run its own capped Serper sweep. ``rank_tracker`` now sweeps a
+    far larger pool on a schedule, and two engines over overlapping queries
+    would bill Serper twice for the same answer — so this reads that run instead
+    of taking one of its own. The stored shape is unchanged, so the Competitors
+    panel, ``rank_shifts`` and ``_domain_stats`` all keep working.
+
+    ``search`` is accepted but unused — kept so existing call sites that still
+    pass it (none do, deliberately) don't break at the call boundary.
+    """
+    from . import rank_tracker
+
+    rows = rank_tracker.latest_rows(brand["id"])
+    meta = rank_tracker.latest_meta(brand["id"]) or {}
+    if not rows:
+        return state.load(f"ranks-{brand['id']}") or {"snapshots": [], "suggested_competitors": []}
+
     ranks: dict[str, dict] = {}
     seen_domains: dict[str, int] = {}
-    for kw in rank_tracking_pool(brand):
-        serp = search(kw)
-        ours = next(
-            (r["position"] for r in serp["organic"] if brand["domain"] in r["link"]), None
-        )
-        top = [_domain(r["link"]) for r in serp["organic"]]
+    for row in rows:
+        if row.get("error"):
+            continue
+        top = [entry["domain"] for entry in row.get("top") or []]
         for d in top:
             if d and d != brand["domain"]:
                 seen_domains[d] = seen_domains.get(d, 0) + 1
-        ranks[kw] = {"position": ours, "top": top[:5]}
+        ranks[row["query"]] = {"position": row.get("position"), "top": top[:5]}
 
-    doc = state.load(f"ranks-{brand['id']}") or {"snapshots": []}
-    doc["snapshots"] = (doc["snapshots"] + [{"at": date.today().isoformat(), "ranks": ranks}])[-MAX_SNAPSHOTS:]
-    doc["suggested_competitors"] = [
-        d for d, _ in sorted(seen_domains.items(), key=lambda kv: -kv[1])[:8]
-    ]
-    state.save(f"ranks-{brand['id']}", doc)
-    return doc
+    at = (meta.get("at") or date.today().isoformat())[:10]
+    suggested = [d for d, _ in sorted(seen_domains.items(), key=lambda kv: -kv[1])[:8]]
+
+    # A 2-hourly sweep calls this several times a day for the same calendar
+    # date — state.mutate's read-modify-write replaces that date's entry
+    # (instead of appending a duplicate) atomically, so two sweeps racing
+    # through this for the same brand can't lose one's write to the other.
+    def change(current: dict) -> tuple[dict, dict]:
+        doc = current or {"snapshots": []}
+        snapshots = [s for s in doc.get("snapshots", []) if s.get("at") != at]
+        doc["snapshots"] = (snapshots + [{"at": at, "ranks": ranks}])[-MAX_SNAPSHOTS:]
+        doc["suggested_competitors"] = suggested
+        return doc, doc
+
+    return state.mutate(f"ranks-{brand['id']}", change)
 
 
 def rank_shifts(brand_id: str) -> list[dict]:

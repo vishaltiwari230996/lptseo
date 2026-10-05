@@ -846,11 +846,8 @@ def cron_run(request: Request, response: Response,
             entry = {"ok": True, "todo_count": len(run["todos"])}
             # Tracking extras are best-effort: missing keys must not fail the
             # sweep, and they deliberately do NOT count toward the status below.
-            try:
-                seo_competitors.rank_snapshot(brand)
-                entry["ranks"] = "updated"
-            except Exception as exc:  # noqa: BLE001
-                entry["ranks"] = f"skipped: {exc}"
+            # Rank tracking itself is now rank_tracker's own scheduled sweep —
+            # running rank_snapshot's live sweep here too would double-bill Serper.
             try:
                 seo_competitors.sitemap_watch(brand)
                 entry["sitemaps"] = "updated"
