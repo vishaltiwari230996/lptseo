@@ -702,6 +702,27 @@ def test_worklist_promotes_a_query_that_lost_ground_this_week():
     assert rows[0]["delta_7d"] == -8      # negative = we fell
 
 
+def test_worklist_dropped_flag_marks_dropout_rows_only():
+    """The worklist row's `dropped` field badges a dropout distinctly from an
+    ordinary losing row — the panel should not have to pattern-match `reason`."""
+    _seed_latest([
+        {"query": "slipping", "position": 12, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+        {"query": "dropped", "position": None, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]},
+    ])
+    rt.append_history("b1", [_result("slipping", 4), _result("dropped", 8)], [],
+                      now=datetime(2026, 10, 1, tzinfo=timezone.utc))
+    rt.append_history("b1", [_result("slipping", 12), _result("dropped", None)], [],
+                      now=datetime(2026, 10, 5, tzinfo=timezone.utc))
+
+    rows = rt.worklist(_brand())
+    by_query = {r["query"]: r for r in rows}
+
+    assert by_query["dropped"]["dropped"] is True
+    assert by_query["slipping"]["dropped"] is False
+
+
 def test_worklist_respects_the_limit():
     _seed_latest([
         {"query": f"q{n}", "position": 9, "url": "", "error": None,

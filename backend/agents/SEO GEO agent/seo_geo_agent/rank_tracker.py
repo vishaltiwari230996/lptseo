@@ -599,6 +599,7 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
             "delta_7d": moved,
             "score": round(demand * band * gap * trend, 3),
             "reason": _reason(position, shown, tracked, moved, dropped),
+            "dropped": dropped,
         })
 
     rows.sort(key=lambda r: -r["score"])

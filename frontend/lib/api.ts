@@ -2988,6 +2988,132 @@ export const seoPageSpeedPage = (id: string, url: string, opts?: RequestOptions)
   getJson<{ page: SpeedRow }>(
     `/api/seo-geo/page-speed/${id}/page?url=${encodeURIComponent(url)}`, opts);
 
+/* ------------------------------ rank tracker ------------------------------ */
+//
+// A 200-query scoreboard swept every two hours, with history, tracked-rival
+// positions, and a worklist. The sweep is a background job — see DeepJob,
+// reused here rather than redefined, exactly like page-speed above.
+
+export interface RankSerpEntry {
+  position: number;
+  domain: string;
+  url: string;
+  title: string;
+}
+
+export interface RankRow {
+  query: string;
+  position: number | null;
+  url: string;
+  checked_at: string;
+  top: RankSerpEntry[];
+  error: string | null;
+}
+
+export interface RankWorklistRow {
+  query: string;
+  position: number | null;
+  impressions: number;
+  leader: string;
+  leader_position: number;
+  leader_url: string;
+  tracked_rival: boolean;
+  delta_7d: number | null;
+  score: number;
+  reason: string;
+  /** True for a query that fell out of the results entirely this week — the
+   *  panel badges this distinctly rather than pattern-matching `reason`. */
+  dropped: boolean;
+}
+
+export interface RankPool {
+  size: number;
+  cap: number;
+  built_at: string | null;
+  sources_used: string[];
+  notes: string[];
+}
+
+export interface RankBudget {
+  date: string;
+  searches: number;
+  cap: number;
+  remaining: number;
+}
+
+/** Fields the panel reads off the sweep's manifest. The manifest (see
+ *  `jobs.save_list`) also carries `chunks`, `count` and `saved_at` — harmless
+ *  extra keys at runtime, not declared here beyond `count`. */
+export interface RankMeta {
+  at: string;
+  ranked: number;
+  errors: number;
+  rivals: string[];
+  count: number;
+}
+
+export interface RankTrackerDoc {
+  rows: RankRow[];
+  meta: RankMeta | null;
+  worklist: RankWorklistRow[];
+  pool: RankPool;
+  budget: RankBudget;
+  competitors: string[];
+  enabled: boolean;
+  job: DeepJob | null;
+}
+
+/** One day's rolled-up triple. A day we ranked nowhere records `best`,
+ *  `worst` and `last` as null; `at` is the epoch-hour of the day's final
+ *  point and is always present. */
+export interface RankDaily {
+  best: number | null;
+  worst: number | null;
+  last: number | null;
+  at: number;
+}
+
+export interface RankHistory {
+  query: string;
+  raw: [number, number | null][];
+  daily: [string, RankDaily][];
+  rivals: Record<string, { raw: [number, number | null][]; daily: [string, RankDaily][] }>;
+}
+
+export interface RankGap {
+  query: string;
+  our_url: string;
+  our_position: number | null;
+  their_url: string;
+  their_domain: string;
+  their_position: number;
+  metrics: {
+    words: { ours: number | null; theirs: number | null };
+    headings: { ours: number | null; theirs: number | null };
+    schema: { ours: string[] | null; theirs: string[] | null };
+  };
+  narrative: string;
+  notes: string[];
+  at: string;
+  cached: boolean;
+}
+
+export const seoRankTracker = (id: string, opts?: RequestOptions) =>
+  getJson<RankTrackerDoc>(`/api/seo-geo/rank-tracker/${id}`, opts);
+
+export const seoRankHistory = (id: string, query: string, opts?: RequestOptions) =>
+  getJson<{ history: RankHistory }>(
+    `/api/seo-geo/rank-tracker/${id}/history?query=${encodeURIComponent(query)}`, opts);
+
+export const seoRankSweep = (id: string) =>
+  postJson<{ job: DeepJob }>(`/api/seo-geo/rank-tracker/${id}/sweep`, {});
+
+export const seoRankPoolRebuild = (id: string) =>
+  postJson<RankTrackerDoc>(`/api/seo-geo/rank-tracker/${id}/pool/rebuild`, {});
+
+export const seoRankGap = (id: string, query: string) =>
+  postJson<{ gap: RankGap }>(`/api/seo-geo/rank-tracker/${id}/gap`, { query });
+
 /* ---- GEO agent (a10): AI answer visibility ---- */
 
 export type GeoEngineId = "perplexity" | "gemini" | "chatgpt" | "aio" | "ai_mode";
