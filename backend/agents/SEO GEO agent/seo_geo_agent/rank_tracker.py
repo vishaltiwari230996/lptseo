@@ -49,6 +49,12 @@ BUDGET_DOC = "rank-budget-{}"
 HARVEST_DOC = "rank-harvest-{}"
 LATEST_PREFIX = "rank-latest-{}"
 HISTORY_PREFIX = "rank-history-{}"
+#: The sweep's own "did I roll up today" stamp. Deliberately NOT a field on
+#: POOL_DOC: build_pool() writes a wholesale fresh dict to that document, so
+#: a same-day pool rebuild between two sweeps would silently erase a stamp
+#: kept there, forcing a redundant rollup. Sweep state belongs in its own
+#: document that only the sweep touches.
+ROLLUP_DOC = "rank-rollup-{}"
 
 
 def _now() -> datetime:
@@ -417,10 +423,15 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
                            "url": entry.get("link", ""),
                            "title": entry.get("title", "")}
                           for n, entry in enumerate(organic)]
-            ours = next((e for e in organic if _ours(e.get("link", ""), brand["domain"])), None)
+            # Read position/url from the already-normalised `top` list, not the
+            # raw organic entry a second time — a provider that omits
+            # `position` already gets an enumerate fallback for `top`, and
+            # reading the raw entry here would throw that fallback away,
+            # silently recording a real rank as unranked (position: None).
+            ours = next((e for e in row["top"] if _ours(e["url"], brand["domain"])), None)
             if ours:
-                row["position"] = ours.get("position")
-                row["url"] = ours.get("link", "")
+                row["position"] = ours["position"]
+                row["url"] = ours["url"]
             harvested.extend(serp.get("related") or [])
             harvested.extend(serp.get("paa") or [])
             ranked += 1
@@ -437,12 +448,11 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
     record_harvest(brand_id, harvested)
     append_history(brand_id, results, rivals, now=moment)
 
-    last_rollup = (state.load(POOL_DOC.format(brand_id)) or {}).get("rolled_up_on")
-    if last_rollup != moment.date().isoformat():
+    today_str = moment.date().isoformat()
+    last_rollup = (state.load(ROLLUP_DOC.format(brand_id)) or {}).get("on")
+    if last_rollup != today_str:
         rollup(brand_id, today=moment.date())
-        pool = latest_pool(brand_id) or {}
-        pool["rolled_up_on"] = moment.date().isoformat()
-        state.save(POOL_DOC.format(brand_id), pool)
+        state.save(ROLLUP_DOC.format(brand_id), {"on": today_str})
 
     return {"checked": len(results), "ranked": ranked, "errors": errors, "blocked": blocked,
             "at": moment.isoformat(timespec="seconds"), "notes": notes}

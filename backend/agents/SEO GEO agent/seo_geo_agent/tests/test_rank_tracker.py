@@ -579,3 +579,65 @@ def test_sweep_uses_brand_serp_country_override_for_the_real_provider(monkeypatc
     seen_gl.clear()
     rt.sweep(_brand())
     assert seen_gl == ["in"]
+
+
+def test_sweep_backfills_position_from_the_normalised_top_list_when_the_provider_omits_it(monkeypatch):
+    """`top` already backfills a missing `position` via enumerate; `row["position"]`
+    must read from that same normalised list rather than the raw organic entry a
+    second time — otherwise a provider that omits `position` on our own listing
+    silently records a real rank as unranked."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, **kw):
+        return {"organic": [
+                    {"link": "https://rival.com/a", "title": "t1"},
+                    {"link": "https://other.com/b", "title": "t2"},
+                    {"link": "https://lawpreptutorial.com/clat", "title": "t3"},
+                ],  # no "position" key anywhere
+                "related": [], "paa": [], "aio_present": False}
+
+    rt.sweep(_brand(), search=search)
+
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] == 3
+    assert [e["position"] for e in row["top"]] == [1, 2, 3]
+
+
+def test_build_pool_between_two_same_day_sweeps_does_not_retrigger_rollup(monkeypatch):
+    """The rollup stamp is sweep state, not pool state: a same-day pool
+    rebuild sitting between two sweeps must not cause a second rollup."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    calls = []
+    original = rt.rollup
+    monkeypatch.setattr(rt, "rollup", lambda *a, **kw: calls.append(1) or original(*a, **kw))
+
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")), now=_at(5, 9))
+    assert calls == [1]
+
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))  # same-day rebuild, between sweeps
+
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")), now=_at(5, 11))
+    assert calls == [1]  # still just the one rollup from the first sweep
+
+
+def test_sweep_rolls_up_again_on_a_new_utc_date(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    calls = []
+    original = rt.rollup
+    monkeypatch.setattr(rt, "rollup", lambda *a, **kw: calls.append(1) or original(*a, **kw))
+
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")), now=_at(5, 9))
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")), now=_at(6, 9))
+
+    assert calls == [1, 1]
