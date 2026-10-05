@@ -168,3 +168,70 @@ def test_gap_route_returns_the_gap_card_on_success(client, monkeypatch):
     resp = client.post("/api/seo-geo/rank-tracker/b1/gap", json={"query": "q1"})
     assert resp.status_code == 200
     assert resp.json()["gap"]["their_domain"] == "rival.com"
+
+
+# ------------------------------- final-review fixes -------------------------------
+
+def test_payload_carries_the_last_sweep_outcome(client, monkeypatch):
+    """I4: a sweep that was disabled, had no key, or found another run in
+    progress writes nothing and `jobs.start` still reports the job as done.
+    The panel needs the reason, or it renders "all clear" over a dead
+    tracker with "Run now" still enabled."""
+    from seo_geo_agent import rank_tracker, state as seo_state
+    seo_state.save(rank_tracker.SWEEP_DOC.format("b1"), {
+        "checked": 0, "ranked": 0, "errors": 0, "blocked": "credentials",
+        "at": "2026-10-05T09:00:00+00:00",
+        "notes": ["SEO_SERPER_API_KEY not set — rank tracking needs live SERPs"]})
+
+    body = client.get("/api/seo-geo/rank-tracker/b1").json()
+
+    assert body["last_sweep"]["blocked"] == "credentials"
+    assert "SEO_SERPER_API_KEY" in body["last_sweep"]["notes"][0]
+
+
+def test_payload_last_sweep_is_null_before_any_sweep(client):
+    """Unknown is not the same as "nothing was blocked" — the panel must be
+    able to tell "never run" from "ran and was refused"."""
+    assert client.get("/api/seo-geo/rank-tracker/b1").json()["last_sweep"] is None
+
+
+def test_setting_competitors_normalises_pasted_urls(client, monkeypatch):
+    """M2: `d.strip().lower()` stored "https://www.Rival.com/pricing", which
+    never equals the "rival.com" a SERP reports — so the rival's rank series
+    stayed empty and the tracked-rival scoring boost never fired, silently."""
+    from seo_geo_agent import insights
+    saved: dict = {}
+    monkeypatch.setattr(insights, "upsert_brand", lambda b: saved.update(b))
+
+    resp = client.put("/api/seo-geo/competitors/b1",
+                      json={"domains": ["https://www.Rival.com/pricing?x=1",
+                                        "WWW.Other.com", "rival.com"]})
+
+    assert resp.status_code == 200
+    # Normalised, and deduped once normalisation makes the duplicate visible.
+    assert resp.json()["tracked"] == ["rival.com", "other.com"]
+    assert saved["competitors"] == ["rival.com", "other.com"]
+
+
+def test_setting_competitors_rejects_a_value_that_is_not_a_domain(client, monkeypatch):
+    """Silently dropping it is the same class of invisible failure as
+    silently storing it wrong."""
+    from seo_geo_agent import insights
+    monkeypatch.setattr(insights, "upsert_brand", lambda b: None)
+
+    resp = client.put("/api/seo-geo/competitors/b1", json={"domains": ["not a domain"]})
+
+    assert resp.status_code == 400
+    assert "site domain" in resp.json()["detail"]
+
+
+def test_setting_competitors_caps_at_the_tracked_rival_limit(client, monkeypatch):
+    """M7: the sweep records history for MAX_RIVALS competitors; the stored
+    list must not exceed what the sweep will ever track."""
+    from seo_geo_agent import insights, rank_tracker
+    monkeypatch.setattr(insights, "upsert_brand", lambda b: None)
+
+    resp = client.put("/api/seo-geo/competitors/b1",
+                      json={"domains": [f"c{n}.com" for n in range(12)]})
+
+    assert len(resp.json()["tracked"]) == rank_tracker.MAX_RIVALS

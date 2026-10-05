@@ -342,7 +342,27 @@ def set_competitors(brand_id: str, payload: CompetitorsIn, user=Depends(require_
                                                   "Edited the tracked competitors", unit=CHANGE)):
     brand = _brand_or_404(brand_id)
     _for(act, brand)
-    brand["competitors"] = [d.strip().lower() for d in payload.domains if d.strip()][:8]
+    # `d.strip().lower()` is not enough: one pasted URL or a "www." prefix and
+    # the stored string never equals the host the SERP reports, so the rival's
+    # rank series stays empty and the worklist's tracked-rival boost never
+    # fires — with no error, no note and nothing in the UI saying so. The
+    # brand's OWN domain has gone through normalize_domain since day one; its
+    # competitors must match it. Rejected rather than silently dropped: a
+    # domain the owner typed and we discarded is the same silent failure.
+    domains: list[str] = []
+    for raw in payload.domains:
+        if not raw.strip():
+            continue
+        try:
+            normalised = insights.normalize_domain(raw)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"“{raw.strip()}” is not a site domain — enter e.g. rival.com",
+            ) from exc
+        if normalised not in domains:
+            domains.append(normalised)
+    brand["competitors"] = domains[:seo_rank.MAX_RIVALS]
     insights.upsert_brand(brand)
     act.note(f"Tracked competitors set to {', '.join(brand['competitors']) or 'none'}")
     return {"tracked": brand["competitors"]}
@@ -845,9 +865,15 @@ def _rank_payload(brand: dict) -> dict:
             "notes": pool.get("notes", []),
         },
         "budget": seo_rank.budget_status(brand_id),
-        "competitors": [d.lower() for d in (brand.get("competitors") or [])][:8],
+        "competitors": seo_rank.tracked_rivals(brand),
         "enabled": seo_rank.enabled(brand),
         "job": seo_jobs.status(seo_rank.JOB_KIND, brand_id),
+        # What the last sweep actually did. `job` only says the background
+        # thread finished; a sweep that was switched off, had no API key, or
+        # found another run in progress finishes cleanly having written
+        # nothing, which the panel rendered as "all clear" with "Run now"
+        # still enabled and no explanation anywhere.
+        "last_sweep": seo_rank.last_sweep(brand_id),
     }
 
 
@@ -911,6 +937,17 @@ def rank_cron(request: Request, response: Response,
     Separate from /seo-geo/cron/run on purpose: that one runs the full brand
     report, which has no business running twelve times a day. Status contract is
     the same, because Cloud Scheduler reads only the status code.
+
+    Concurrency is guarded inside ``rank_tracker.sweep`` itself, by a lease
+    document, NOT by ``jobs.start``. Two reasons, and either alone decides it:
+    ``jobs._RUNNING`` is a dict in one Python process while Cloud Run holds
+    several, so it serialises nothing between instances; and ``jobs.start``
+    backgrounds the work and returns at once, which would make this endpoint
+    answer 200 before a single query had been checked — the status code
+    Cloud Scheduler reads would stop meaning anything (ruling R19). The lease
+    gives both callers — this one and the manual /sweep route — one sweep per
+    brand at a time across every process, while this handler stays
+    synchronous and keeps answering honestly.
     """
     expected = os.environ.get("SEO_CRON_KEY", "")
     if not expected:
