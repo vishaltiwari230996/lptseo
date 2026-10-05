@@ -239,8 +239,13 @@ def test_rollup_collapses_raw_points_older_than_the_window_into_daily_triples():
     rt.rollup("b1", today=date(2026, 10, 20))
 
     row = rt.history_for("b1", "q")
-    assert row["daily"] == [["2026-10-01", {"best": 7, "worst": 11, "last": 9}]]
-    assert [p[1] for p in row["raw"]] == [5]   # only the recent point survives
+    daily_entry = row["daily"][0]
+    assert daily_entry[0] == "2026-10-01"
+    triple = daily_entry[1]
+    assert triple["best"] == 7
+    assert triple["worst"] == 11
+    assert triple["last"] == 9
+    assert "at" in triple and isinstance(triple["at"], int)
 
 
 def test_rollup_is_idempotent_within_a_day():
@@ -261,3 +266,75 @@ def test_rollup_trims_dailies_past_the_retention_window():
 def test_history_survives_a_query_leaving_the_pool():
     rt.append_history("b1", [_result("retired query", 12)], [], now=_at(5))
     assert rt.history_for("b1", "retired query")["raw"][0][1] == 12
+
+
+def test_rollup_keeps_days_with_all_none_positions():
+    """A day where every point was None still gets a daily entry."""
+    for hour in (8, 12, 16):
+        rt.append_history("b1", [_result("q", None)], [], now=_at(1, hour))
+    
+    rt.rollup("b1", today=date(2026, 10, 20))
+    
+    row = rt.history_for("b1", "q")
+    assert len(row["daily"]) == 1
+    triple = row["daily"][0][1]
+    assert triple["best"] is None
+    assert triple["worst"] is None
+    assert triple["last"] is None
+    assert "at" in triple
+
+
+def test_rollup_last_is_the_final_point_even_when_none():
+    """On a mixed day, last reports the chronologically final position, even if None."""
+    rt.append_history("b1", [_result("q", 5)], [], now=_at(1, 8))
+    rt.append_history("b1", [_result("q", 3)], [], now=_at(1, 12))
+    rt.append_history("b1", [_result("q", None)], [], now=_at(1, 16))  # fell out of results
+    
+    rt.rollup("b1", today=date(2026, 10, 20))
+    
+    row = rt.history_for("b1", "q")
+    triple = row["daily"][0][1]
+    assert triple["best"] == 3
+    assert triple["worst"] == 5
+    assert triple["last"] is None
+
+
+def test_rollup_reroll_with_earlier_stale_point_widens_but_preserves_last():
+    """When re-rolling a day, an earlier point widens best/worst but doesn't change last or at."""
+    rt.append_history("b1", [_result("q", 5)], [], now=_at(1, 12))
+    rt.rollup("b1", today=date(2026, 10, 20))
+    
+    row = rt.history_for("b1", "q")
+    original_at = row["daily"][0][1]["at"]
+    original_last = row["daily"][0][1]["last"]
+    
+    # Now discover an earlier point that wasn't included before (simulating backfill)
+    rt.append_history("b1", [_result("q", 9)], [], now=_at(1, 8))
+    rt.rollup("b1", today=date(2026, 10, 20))
+    
+    row = rt.history_for("b1", "q")
+    triple = row["daily"][0][1]
+    assert triple["best"] == 5
+    assert triple["worst"] == 9  # widened
+    assert triple["last"] == original_last  # unchanged
+    assert triple["at"] == original_at  # unchanged
+
+
+def test_rollup_reroll_with_later_stale_point_updates_last_and_at():
+    """When re-rolling a day, a later point does replace last and at."""
+    rt.append_history("b1", [_result("q", 5)], [], now=_at(1, 12))
+    rt.rollup("b1", today=date(2026, 10, 20))
+    
+    row = rt.history_for("b1", "q")
+    original_at = row["daily"][0][1]["at"]
+    
+    # Now discover a later point for the same day
+    rt.append_history("b1", [_result("q", 3)], [], now=_at(1, 16))
+    rt.rollup("b1", today=date(2026, 10, 20))
+    
+    row = rt.history_for("b1", "q")
+    triple = row["daily"][0][1]
+    assert triple["best"] == 3
+    assert triple["worst"] == 5
+    assert triple["last"] == 3  # updated to later point
+    assert triple["at"] > original_at  # updated to later hour

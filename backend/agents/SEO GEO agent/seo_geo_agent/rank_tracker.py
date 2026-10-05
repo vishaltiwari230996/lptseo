@@ -282,25 +282,44 @@ def _roll_series(series: dict, cutoff_hours: int, oldest_day: date) -> dict:
     keep_raw = [p for p in series.get("raw", []) if p[0] >= cutoff_hours]
     stale = [p for p in series.get("raw", []) if p[0] < cutoff_hours]
 
-    buckets: dict[str, list[int]] = {}
+    buckets: dict[str, list[tuple[int, int | None]]] = {}
     for hours, position in stale:
-        if position is None:
-            continue
-        buckets.setdefault(_hours_to_date(hours).isoformat(), []).append(position)
+        day_str = _hours_to_date(hours).isoformat()
+        buckets.setdefault(day_str, []).append((hours, position))
 
     daily = {day: triple for day, triple in series.get("daily", [])}
-    for day, positions in buckets.items():
+    for day, points_with_hours in buckets.items():
         existing = daily.get(day)
-        best = min(positions + ([existing["best"]] if existing else []))
-        worst = max(positions + ([existing["worst"]] if existing else []))
-        daily[day] = {"best": best, "worst": worst, "last": positions[-1]}
+        positions = [pos for _, pos in points_with_hours]
+        ranked_positions = [pos for pos in positions if pos is not None]
+        
+        # Compute best and worst from ranked positions and existing values
+        best_candidates = ranked_positions
+        if existing and existing.get("best") is not None:
+            best_candidates = best_candidates + [existing["best"]]
+        best = min(best_candidates) if best_candidates else None
+        
+        worst_candidates = ranked_positions
+        if existing and existing.get("worst") is not None:
+            worst_candidates = worst_candidates + [existing["worst"]]
+        worst = max(worst_candidates) if worst_candidates else None
+        
+        # last and at: only update if new point is chronologically later
+        last = positions[-1]
+        at = points_with_hours[-1][0]
+        if existing and existing.get("at") is not None and at <= existing["at"]:
+            # Earlier or same point; keep the existing last and at
+            last = existing["last"]
+            at = existing["at"]
+        
+        daily[day] = {"best": best, "worst": worst, "last": last, "at": at}
 
     kept = sorted((d, t) for d, t in daily.items() if date.fromisoformat(d) >= oldest_day)
     return {"raw": keep_raw, "daily": [[d, t] for d, t in kept]}
 
 
 def rollup(brand_id: str, today: date | None = None) -> int:
-    """Fold the raw tail into dailies and trim both windows. Returns rows touched.
+    """Fold the raw tail into dailies and trim both windows. Returns the number of history rows written.
 
     Idempotent: a second call finds nothing older than the cutoff, so re-running
     it after a restart or an overlapping sweep is safe.
