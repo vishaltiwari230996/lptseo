@@ -522,13 +522,15 @@ def test_sweep_refuses_when_rank_tracking_is_disabled_for_the_brand(monkeypatch)
     assert out["blocked"] == "disabled" and calls == []
 
 
-def test_sweep_charges_one_credit_per_query(monkeypatch):
+def test_sweep_charges_one_credit_per_query_when_found_on_page_1(monkeypatch):
+    """The cheap case: a query already ranking on page 1 needs no second
+    fetch, so three queries cost exactly three credits, not six."""
     from seo_geo_agent import competitors
     monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["a", "b", "c"])
     monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
     rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
 
-    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://x.com/")))
+    rt.sweep(_brand(), search=lambda q, **kw: _serp((1, "https://lawpreptutorial.com/")))
 
     assert rt.budget_status("b1")["searches"] == 3
 
@@ -559,7 +561,7 @@ def test_sweep_skips_inactive_queries(monkeypatch):
     rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
 
     seen = []
-    rt.sweep(_brand(), search=lambda q, **kw: seen.append(q) or _serp((1, "https://x.com/")))
+    rt.sweep(_brand(), search=lambda q, **kw: seen.append(q) or _serp((1, "https://lawpreptutorial.com/")))
 
     assert seen == ["new"]
 
@@ -578,9 +580,9 @@ def test_sweep_uses_brand_serp_country_override_for_the_real_provider(monkeypatc
     monkeypatch.setattr(sources, "brand_rank_available", lambda: True)
     seen_gl = []
 
-    def fake_provider(query, client=None, *, gl="in", hl="en", num=20):
+    def fake_provider(query, client=None, *, gl="in", hl="en", num=10, page=1):
         seen_gl.append(gl)
-        return _serp((1, "https://x.com/"))
+        return _serp((1, "https://lawpreptutorial.com/"))  # found on page 1 — no page-2 call
 
     monkeypatch.setattr(sources, "brand_rank_search", fake_provider)
 
@@ -615,6 +617,203 @@ def test_sweep_backfills_position_from_the_normalised_top_list_when_the_provider
     row = rt.latest_rows("b1")[0]
     assert row["position"] == 3
     assert [e["position"] for e in row["top"]] == [1, 2, 3]
+
+
+# --- Adaptive page-2 fetch --------------------------------------------------
+#
+# Serper's page 1 caps at 10 organic results no matter what `num` asks for
+# (measured against the live API), so a query at rank 11 looked identical to
+# one at rank 95 — both `position: None`. Page 2 costs one more credit and
+# returns the next 10, with `position` restarting at 1. The sweep now spends
+# that second credit only when page 1 did not already find us.
+
+def _paged_serp(page1, page2=()):
+    """A `search(query, page=1)` double returning different organic entries
+    per page — `page1`/`page2` are each a list of (position, url) pairs, like
+    `_serp`'s own varargs."""
+    def search(query, page=1, **kw):
+        return _serp(*(page1 if page == 1 else page2))
+    return search
+
+
+def test_sweep_found_on_page_1_charges_one_credit_and_never_requests_page_2(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    pages_requested = []
+
+    def search(query, page=1, **kw):
+        pages_requested.append(page)
+        return _serp((5, "https://lawpreptutorial.com/x"))
+
+    out = rt.sweep(_brand(), search=search)
+
+    assert pages_requested == [1]
+    assert out["errors"] == 0
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] == 5
+    assert row["error"] is None
+    assert rt.budget_status("b1")["searches"] == 1
+
+
+def test_sweep_found_on_page_2_records_an_absolute_rank_and_a_full_twenty_top(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    page1 = [(p, f"https://rival{p}.com/") for p in range(1, 11)]
+    page2 = [(p, f"https://rival{p}.com/p2") for p in range(1, 11)]
+    page2[2] = (3, "https://lawpreptutorial.com/clat")  # page-relative #3 -> absolute 13
+
+    out = rt.sweep(_brand(), search=_paged_serp(page1, page2))
+
+    assert out["errors"] == 0
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] == 13
+    assert row["error"] is None
+    assert len(row["top"]) == 20
+    assert [e["position"] for e in row["top"]] == list(range(1, 21))
+    assert rt.budget_status("b1")["searches"] == 2
+
+
+def test_sweep_absent_from_both_pages_is_unranked_not_an_error(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    page1 = [(p, f"https://rival{p}.com/") for p in range(1, 11)]
+    page2 = [(p, f"https://rival{p}.com/p2") for p in range(1, 11)]
+
+    out = rt.sweep(_brand(), search=_paged_serp(page1, page2))
+
+    assert out["errors"] == 0
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] is None
+    assert row["error"] is None
+    assert len(row["top"]) == 20
+    assert [e["position"] for e in row["top"]] == list(range(1, 21))
+    assert rt.budget_status("b1")["searches"] == 2
+
+
+def test_sweep_page_2_raising_keeps_page_1_and_notes_the_query_without_erroring(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching", "second one"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, page=1, **kw):
+        if page == 1:
+            return _serp((1, "https://rival.com/a"))
+        raise RuntimeError("serper 500")
+
+    out = rt.sweep(_brand(), search=search)
+
+    assert out["errors"] == 0  # page 1 succeeded for both; page 2 failing is not a row error
+    assert out["checked"] == 2 and out["ranked"] == 2
+    for row in rt.latest_rows("b1"):
+        assert row["error"] is None
+        assert row["position"] is None
+        assert len(row["top"]) == 1  # page 1's result only — page 2 never got appended
+    assert any("clat coaching" in n for n in out["notes"])
+    assert any("second one" in n for n in out["notes"])
+
+
+def test_sweep_page_2_empty_organic_keeps_page_1_and_notes_it(monkeypatch):
+    """Page 2 answering with no organic results (no exception) degrades the
+    same way as a raise: page 1's result is kept, a note is added, and the
+    row is not an error."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    out = rt.sweep(_brand(), search=_paged_serp([(1, "https://rival.com/a")], []))
+
+    assert out["errors"] == 0
+    row = rt.latest_rows("b1")[0]
+    assert row["error"] is None
+    assert row["position"] is None
+    assert len(row["top"]) == 1
+    assert any("clat coaching" in n for n in out["notes"])
+
+
+def test_sweep_page_2_budget_refusal_keeps_page_1_result_and_continues(monkeypatch):
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["clat coaching"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+    # Leave exactly one credit: enough for page 1's charge, not page 2's.
+    rt.charge("b1", rt.MAX_SEARCHES_PER_DAY - 1, today=date(2026, 10, 5))
+
+    page2_calls = []
+
+    def search(query, page=1, **kw):
+        if page == 2:
+            page2_calls.append(query)
+        return _serp((1, "https://rival.com/a"))  # never matches our domain
+
+    out = rt.sweep(_brand(), search=search, now=_at(5, 9))
+
+    assert page2_calls == []  # budget refused the charge before page 2 was ever requested
+    assert out["blocked"] is None  # one query's page 2 being skipped does not block the sweep
+    assert out["errors"] == 0
+    row = rt.latest_rows("b1")[0]
+    assert row["position"] is None
+    assert len(row["top"]) == 1
+    assert any("clat coaching" in n for n in out["notes"])
+
+
+def test_sweep_empty_page_1_is_still_an_error_and_never_requests_page_2(monkeypatch):
+    """Two queries, one erroring — so this stays a PARTIAL sweep. An
+    all-errored sweep is a total outage and writes no rows at all (see
+    `test_a_total_outage_does_not_overwrite_the_previous_results`), which
+    would make this test about something else entirely."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q", "ok"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    pages_requested = []
+
+    def search(query, page=1, **kw):
+        pages_requested.append((query, page))
+        if query == "q":
+            return _serp()  # empty organic -> "empty SERP"
+        return _serp((1, "https://lawpreptutorial.com/a"))
+
+    out = rt.sweep(_brand(), search=search)
+
+    # an empty page 1 is a provider failure, not "rank unknown" — page 2 is
+    # never requested for it
+    assert pages_requested == [("q", 1), ("ok", 1)]
+    assert out["errors"] == 1
+    row = next(r for r in rt.latest_rows("b1") if r["query"] == "q")
+    assert row["error"] == "empty SERP"
+    assert rt.budget_status("b1")["searches"] == 2
+
+
+def test_sweep_harvest_comes_from_page_1_only(monkeypatch):
+    """Page 2 repeats page 1's related/PAA blocks; harvesting it too would
+    double-count the frequencies that drive pool promotion."""
+    from seo_geo_agent import competitors
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: ["q"])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+    rt.build_pool(_brand(), rows_fn=lambda b: ([], []))
+
+    def search(query, page=1, **kw):
+        serp = _serp((1, "https://rival.com/a"))  # never matches -> page 2 gets requested
+        serp["related"] = [f"page {page} related"]
+        serp["paa"] = [f"page {page} paa"]
+        return serp
+
+    rt.sweep(_brand(), search=search)
+
+    harvested = set(rt._harvest_ranked("b1"))
+    assert harvested == {"page 1 related", "page 1 paa"}
 
 
 def test_build_pool_between_two_same_day_sweeps_does_not_retrigger_rollup(monkeypatch):

@@ -136,11 +136,45 @@ all degrade quietly.
 `POST /api/seo-geo/rank-tracker/cron` (header `x-cron-key: $SEO_CRON_KEY`) sweeps
 every enabled brand's rank pool. Cloud Scheduler runs it on `0 */2 * * *`.
 
-At 200 queries × 12 runs/day that is ~2,400 Serper searches per brand per day
-(~72,000/month). A per-brand ceiling of 3,000/day is enforced in
-`rank_tracker.MAX_SEARCHES_PER_DAY`; `SEO_RANK_SWEEP_DISABLED=1` stops it
-everywhere. To lower the cadence, change the Cloud Scheduler expression — no
-code change is needed.
+**Measured against the live API: `num` is ignored by this Serper plan.**
+`num=10`, `num=20` and `num=100` all billed exactly 1 credit and all returned
+at most 10 organic results on page 1 (fewer if that's all that existed) —
+raising `SERP_RESULTS` bought nothing, so it was dropped back to `10` and the
+striking-distance band (ranks 4–20) that the worklist scores on was half-blind:
+a query at rank 11 and one at rank 95 both came back `position: None`.
+
+Depth past 10 comes from Serper's `page` parameter instead — page 2 costs one
+*additional* credit and returns the next 10 results. The sweep (`rank_tracker.
+sweep`) now fetches it adaptively, per query: page 1 first, and page 2 only
+when our domain was not on page 1. A query already ranking top-10 costs
+exactly what it always did; a query that is not costs one credit more, and
+pays for seeing whether it is sitting at 11-20 or nowhere at all.
+
+That makes the monthly bill a **range, not a fixed number**, and it shrinks as
+rankings improve:
+
+- **Floor — every query already top-10:** 200 queries × 12 runs/day × 1 credit
+  = 2,400/brand/day (~72,000/month). This is the number the schedule was
+  originally sized against.
+- **Ceiling — every query missing page 1:** 200 queries × 12 runs/day × 2
+  credits = 4,800/brand/day (~144,000/month).
+- **In practice:** somewhere between the two, trending toward the floor as the
+  worklist does its job — the whole point of tracking rank 11-20 instead of
+  just "not in the top 10" is to close those gaps, and each one closed removes
+  that query's second credit from every future sweep.
+
+A per-brand ceiling of 3,000/day is enforced in `rank_tracker.
+MAX_SEARCHES_PER_DAY` — above the 2,400 floor, but *below* the 4,800 worst-case
+ceiling. At 200 queries all missing page 1, one sweep alone needs 400 charges
+(200 × 2), so the 8th sweep of a worst-case day (8 × 400 = 3,200 > 3,000) hits
+the cap before completing its 200 queries. **What happens then is exactly what
+`charge()` already does for any budget exhaustion: the sweep stops partway
+through, keeps the rows it already has, and reports `blocked: "budget"` with a
+note naming how many queries it managed before stopping** — it does not queue,
+retry, or silently skip the rest. The remaining sweeps that day are refused
+outright the same way, until the UTC date rolls over. `SEO_RANK_SWEEP_DISABLED=1`
+stops the cron everywhere; to lower the cadence instead, change the Cloud
+Scheduler expression — no code change is needed.
 
 The cron sweeps brands **sequentially**, so its wall-clock runtime grows with
 brand count — manageable at one brand, worth revisiting before a second is
@@ -148,36 +182,10 @@ onboarded.
 
 #### Before enabling the schedule
 
-Three explicit actions are required before the Cloud Scheduler job is created.
+Two explicit actions are required before the Cloud Scheduler job is created.
 Each must complete before the next:
 
-**(a) Verify Serper's billing for `num=20`**
-
-`sources.SERP_RESULTS` is currently `20`, chosen so positions 11–20 — the
-striking-distance band the worklist scores on — are visible. If Serper bills
-more than one credit for `num=20`, the real cost is double the arithmetic above.
-
-To verify: note the credit balance in your Serper account, then issue one search
-at `num=20` and one at `num=10` against `https://google.serper.dev/search` with
-`gl=in`/`hl=en`:
-
-```bash
-curl -s -X POST https://google.serper.dev/search \
-  -H "X-API-KEY: $SEO_SERPER_API_KEY" -H "Content-Type: application/json" \
-  -d '{"q":"clat coaching","num":20,"gl":"in","hl":"en"}'
-
-curl -s -X POST https://google.serper.dev/search \
-  -H "X-API-KEY: $SEO_SERPER_API_KEY" -H "Content-Type: application/json" \
-  -d '{"q":"clat coaching","num":10,"gl":"in","hl":"en"}'
-```
-
-Compare the two credit deltas. If `num=20` costs more than one credit, the cost
-floor is doubled. In that case, set `SERP_RESULTS = 10` in `sources.py`, update
-the constant's comment to record the measured cost, and update the assertion
-in `test_brand_rank_search_sends_india_locale_and_depth` from `20` to `10` with
-a note explaining why.
-
-**(b) Run one manual sweep and inspect it**
+**(a) Run one manual sweep and inspect it**
 
 With the service deployed: in the Rank tracker panel, click **Rebuild pool**,
 then **Run now**. Confirm in the result panel that:
@@ -186,7 +194,7 @@ then **Run now**. Confirm in the result panel that:
 - the ranks look like Indian SERPs (domains common in India, not US brands)
 - the worklist's top rows are queries worth working on
 
-**(c) Create the Cloud Scheduler job**
+**(b) Create the Cloud Scheduler job**
 
 ```bash
 gcloud scheduler jobs create http seo-rank-sweep \

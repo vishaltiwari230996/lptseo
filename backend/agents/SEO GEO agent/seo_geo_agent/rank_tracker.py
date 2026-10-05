@@ -36,8 +36,12 @@ MAX_POOL = 200
 MAX_QUERY_LEN = 200
 #: Below this, a Search Console query is noise rather than demand.
 MIN_GSC_IMPRESSIONS = 3
-#: Per brand, per UTC date. Sits just above the 2,400 a 2-hourly sweep of 200
-#: queries needs, so an unplanned extra sweep is absorbed but a loop is not.
+#: Per brand, per UTC date. A 2-hourly sweep of 200 queries costs 200-400
+#: Serper credits (the adaptive page-2 fetch bills a second credit only for
+#: a query absent from page 1), so 3,000 sits above the 2,400 floor but below
+#: the 4,800 ceiling of 12 worst-case sweeps — a worst-case day's sweeps stop
+#: early once this is hit, rather than being absorbed silently. See the
+#: "Rank tracker schedule" section of the README for the full cost math.
 MAX_SEARCHES_PER_DAY = 3000
 RAW_RETENTION_DAYS = 7
 DAILY_RETENTION_DAYS = 180
@@ -533,8 +537,8 @@ def sweep(brand: dict, progress=None, search=None, now=None) -> dict:
         # parameter already existed; nobody was passing it.
         owned_client = httpx.Client(timeout=20)
 
-        def search(query: str) -> dict:
-            return sources.brand_rank_search(query, owned_client, gl=gl)
+        def search(query: str, page: int = 1) -> dict:
+            return sources.brand_rank_search(query, owned_client, gl=gl, page=page)
 
     started = False
     try:
@@ -603,6 +607,45 @@ def _sweep_locked(brand: dict, search, moment: datetime, stamp: str,
             # reading the raw entry here would throw that fallback away,
             # silently recording a real rank as unranked (position: None).
             ours = next((e for e in row["top"] if _ours(e["url"], brand["domain"])), None)
+
+            # Adaptive second fetch: page 1 only ever shows ranks 1-10, so a
+            # query sitting at 11 looks identical to one at 95 — both record
+            # `position: None` and the striking-distance band (4-20) that the
+            # worklist is built on is half-blind. Spend the extra credit only
+            # when the answer is still unknown; a query already on page 1
+            # costs nothing extra.
+            if ours is None:
+                if charge(brand_id, 1, today=moment.date()):
+                    try:
+                        serp2 = search(query, page=2)
+                        organic2 = serp2.get("organic") or []
+                        if not organic2:
+                            notes.append(
+                                f"page 2 for {query!r} returned nothing — keeping the page 1 result")
+                        else:
+                            # Page 2's own `position` restarts at 1; +10 makes
+                            # it an absolute rank. related/paa are deliberately
+                            # NOT harvested from serp2 — page 2 repeats page 1's
+                            # related/PAA blocks and would double-count the
+                            # harvest frequencies that drive pool promotion.
+                            row["top"] = row["top"] + [
+                                {"position": entry.get("position", n + 1) + 10,
+                                 "domain": sources.domain_of(entry.get("link", "")),
+                                 "url": entry.get("link", ""),
+                                 "title": entry.get("title", "")}
+                                for n, entry in enumerate(organic2)
+                            ]
+                            ours = next((e for e in row["top"]
+                                        if _ours(e["url"], brand["domain"])), None)
+                    except Exception as exc:  # noqa: BLE001 — page 1 already
+                        # succeeded; a page-2 failure must not void that and
+                        # must not fault the whole row.
+                        notes.append(f"page 2 lookup for {query!r} failed: {exc}"[:200])
+                else:
+                    notes.append(
+                        f"Daily search budget reached before a second page for {query!r} — "
+                        "keeping the page 1 result")
+
             if ours:
                 row["position"] = ours["position"]
                 row["url"] = ours["url"]

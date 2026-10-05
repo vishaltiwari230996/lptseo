@@ -34,10 +34,15 @@ REAL_SERPER_ENDPOINT = "https://google.serper.dev/search"
 # The DataForSEO path above already pins the same market (location_code 2356).
 SERP_COUNTRY = "in"
 SERP_LANGUAGE = "en"
-#: 20 so positions 11-20 — the striking-distance band the worklist scores on —
-#: are visible at all. See the credit-verification step in Task 13 before
-#: raising this.
-SERP_RESULTS = 20
+#: Measured against the live API: this Serper plan silently ignores ``num``.
+#: ``num=10``, ``num=20`` and ``num=100`` all bill 1 credit and all return at
+#: most 10 organic results on page 1 (fewer if that's all that exists) — so
+#: raising this constant buys nothing. Depth past the top 10 comes from the
+#: ``page`` parameter instead: page 2 costs one more credit and returns the
+#: next 10, with ``position`` restarting at 1 (``rank_tracker.sweep`` offsets
+#: it by +10 to get an absolute rank). See the adaptive second-fetch in
+#: ``rank_tracker.sweep`` before raising this.
+SERP_RESULTS = 10
 
 # --- Deadlines -------------------------------------------------------------
 # These run in sync handlers, i.e. on one of anyio's 40 worker threads, so a
@@ -414,7 +419,7 @@ def brand_rank_available() -> bool:
 
 def brand_rank_search(query: str, client: httpx.Client | None = None, *,
                       gl: str = SERP_COUNTRY, hl: str = SERP_LANGUAGE,
-                      num: int = SERP_RESULTS) -> dict:
+                      num: int = SERP_RESULTS, page: int = 1) -> dict:
     """One Google SERP via real Serper.dev — used ONLY by competitor rank
     tracking (competitors.rank_snapshot). Every other caller in this codebase
     (Keyword Lab, SERP X-ray, competitor profiles) stays on serper_search()'s
@@ -429,16 +434,25 @@ def brand_rank_search(query: str, client: httpx.Client | None = None, *,
     longer window for Cloud Run to kill the job mid-sweep (see the
     ``--timeout=900`` note in the README). ``rank_tracker.sweep`` passes one;
     every other caller leaves it None and gets a private client, closed here.
+
+    ``page`` defaults to 1 and is omitted from the POST body in that case, so
+    existing callers get the byte-identical request they always sent. Page 2
+    costs Serper one additional credit and returns the next 10 organic
+    results with ``position`` restarting at 1 — the caller (``rank_tracker.
+    sweep``) is responsible for offsetting those into absolute ranks.
     """
     key = _real_serper_key()
     if not key or not state.use_network():
         raise CredentialMissing("SEO_SERPER_API_KEY not set")
     own = client is None
     cli = client or httpx.Client(timeout=20)
+    body = {"q": query, "num": num, "gl": gl, "hl": hl}
+    if page != 1:
+        body["page"] = page
     try:
         resp = cli.post(
             REAL_SERPER_ENDPOINT,
-            json={"q": query, "num": num, "gl": gl, "hl": hl},
+            json=body,
             headers={"X-API-KEY": key, "Content-Type": "application/json"},
         )
         resp.raise_for_status()

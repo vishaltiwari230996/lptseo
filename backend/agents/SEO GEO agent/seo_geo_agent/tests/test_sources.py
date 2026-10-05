@@ -78,8 +78,13 @@ def test_brand_rank_search_sends_india_locale_and_depth(monkeypatch):
 
     assert sent["gl"] == "in"
     assert sent["hl"] == "en"
-    assert sent["num"] == 20
+    # Measured against the live API: num=10, num=20 and num=100 all bill one
+    # credit and all cap at 10 organic results on page 1 — `num` is ignored
+    # by this Serper plan. SERP_RESULTS was dropped from 20 to 10 to stop
+    # pretending otherwise; depth past 10 comes from `page` instead.
+    assert sent["num"] == 10
     assert sent["q"] == "clat coaching"
+    assert "page" not in sent  # page 1 is omitted, not sent as page=1
 
 
 def test_brand_rank_search_locale_is_overridable(monkeypatch):
@@ -99,3 +104,28 @@ def test_brand_rank_search_locale_is_overridable(monkeypatch):
     sources.brand_rank_search("clat", client=FakeClient(), gl="us", num=10)
     assert sent["gl"] == "us"
     assert sent["num"] == 10
+
+
+def test_brand_rank_search_page_2_is_sent_and_offsets_nothing_itself(monkeypatch):
+    """`page` defaults to 1 and is omitted from the body then (byte-identical
+    with every existing caller); page 2 is sent explicitly. Any absolute-rank
+    offsetting (+10) is the caller's job (`rank_tracker.sweep`), not this
+    function's — it hands back whatever Serper says, as-is."""
+    monkeypatch.setenv("SEO_SERPER_API_KEY", "test-key")
+    monkeypatch.setenv("SEO_ALLOW_NETWORK", "1")
+    sent = {}
+
+    class FakeResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"organic": [{"link": "https://rival.com/x", "title": "t", "position": 1}]}
+
+    class FakeClient:
+        def post(self, url, json=None, headers=None):
+            sent.update(json)
+            return FakeResponse()
+
+    result = sources.brand_rank_search("clat", client=FakeClient(), page=2)
+
+    assert sent["page"] == 2
+    assert result["organic"][0]["position"] == 1  # untouched — not offset here
