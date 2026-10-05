@@ -19,6 +19,7 @@ import { DeepAuditPanel } from "./deep";
 import { InsightsView } from "./insights";
 import { RankTrackerView } from "./ranktracker";
 import { Shell, type SidebarSection } from "./shell";
+import { Donut } from "./viz";
 
 /* "Keyword lab" used to live here too; it now sits in the Keywords section,
    next to the pool it feeds, rather than behind a second switcher. */
@@ -819,23 +820,21 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                   ) : (
                     <>
                       {run.summary.mode === "rank-tracking" ? (
-                        <div className="seo-summary">
-                          <div className="seo-stat">
-                            <span className="seo-stat__label">Tracked keywords</span>
-                            <span className="seo-stat__num">{run.summary.tracked ?? 0}</span>
-                          </div>
-                          <div className="seo-stat">
-                            <span className="seo-stat__label">Top 3</span>
-                            <span className="seo-stat__num seo-stat__num--good">{run.summary.top3 ?? 0}</span>
-                          </div>
-                          <div className="seo-stat">
-                            <span className="seo-stat__label">Page 1</span>
-                            <span className="seo-stat__num">{run.summary.top10 ?? 0}</span>
-                          </div>
-                          <div className="seo-stat">
-                            <span className="seo-stat__label">Not ranking</span>
-                            <span className="seo-stat__num">{run.summary.unranked ?? 0}</span>
-                          </div>
+                        <div className="seo-summary seo-summary--rank">
+                          <Donut
+                            size={100} strokeWidth={13}
+                            centerValue={String(run.summary.tracked ?? 0)} centerLabel="tracked"
+                            segments={[
+                              { key: "top3", label: "Top 3", value: run.summary.top3 ?? 0, tone: "good" },
+                              {
+                                key: "page1",
+                                label: "Page 1",
+                                value: Math.max(0, (run.summary.top10 ?? 0) - (run.summary.top3 ?? 0)),
+                                tone: "mid",
+                              },
+                              { key: "unranked", label: "Not ranking", value: run.summary.unranked ?? 0, tone: "bad" },
+                            ]}
+                          />
                           <div className="seo-stat">
                             <span className="seo-stat__label">Since last check</span>
                             <span className="seo-stat__num">

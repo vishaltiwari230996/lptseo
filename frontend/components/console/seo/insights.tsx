@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { seoPriorities, seoPrioritiesRefresh, type SeoPrioritiesDoc } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
+import { Donut } from "./viz";
 
 const SEVERITY_LABEL: Record<string, string> = {
   critical: "Critical",
@@ -54,6 +55,10 @@ export function InsightsView({ brandId, onToast, onNavigate }: {
     return <p className="seo-note">Loading insights…</p>;
   }
 
+  const critical = doc?.items.filter((i) => i.severity === "critical").length ?? 0;
+  const warning = doc?.items.filter((i) => i.severity === "warning").length ?? 0;
+  const suggestion = doc?.items.filter((i) => i.severity === "suggestion").length ?? 0;
+
   return (
     <div className="seo-insights-panel">
       <div className="seo-insights-panel__head">
@@ -62,6 +67,20 @@ export function InsightsView({ brandId, onToast, onNavigate }: {
           {busy ? "Rebuilding…" : "Rebuild"}
         </button>
       </div>
+
+      {doc && doc.items.length > 0 && (
+        <div className="seo-insights-panel__severity">
+          <Donut
+            size={88} strokeWidth={12}
+            centerValue={String(doc.items.length)} centerLabel="open items"
+            segments={[
+              { key: "critical", label: "Critical", value: critical, tone: "bad" },
+              { key: "warning", label: "Warning", value: warning, tone: "warn" },
+              { key: "suggestion", label: "Suggestion", value: suggestion, tone: "flat" },
+            ]}
+          />
+        </div>
+      )}
 
       {!doc || doc.items.length === 0 ? (
         <p className="seo-empty">Nothing urgent right now — every connected source is clean.</p>

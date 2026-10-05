@@ -12,6 +12,7 @@ import {
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { Icon } from "@/lib/kit-ui";
 import { describeFailure } from "@/lib/load";
+import { RadialGauge } from "./viz";
 
 /** Researcher-layer tabs for the SEO agent: Keywords, Competitors, Briefs, Audit. */
 
@@ -403,10 +404,14 @@ export function CompetitorsView({ brandId, isCreator, onToast }: {
                     <Icon name={open ? "chevron-up" : "chevron-down"} size={15} />
                   </button>
                   <div className="seo-comp__stats">
-                    <div className="seo-stat">
-                      <span className="seo-stat__label">Visibility</span>
-                      <span className="seo-stat__num">{p.visibility_pct != null ? `${p.visibility_pct}%` : "—"}</span>
-                    </div>
+                    <RadialGauge
+                      value={p.visibility_pct}
+                      display={p.visibility_pct != null ? `${p.visibility_pct}%` : undefined}
+                      label="Visibility"
+                      tone="neutral"
+                      size={60}
+                      strokeWidth={6}
+                    />
                     <div className="seo-stat">
                       <span className="seo-stat__label">Avg. position</span>
                       <span className="seo-stat__num">{p.avg_position != null ? p.avg_position : "—"}</span>

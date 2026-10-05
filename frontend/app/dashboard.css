@@ -49,6 +49,15 @@
 .seo-app .seo-tile--good { border-left-color: var(--success); }
 .seo-app .seo-tile--warn { border-left-color: var(--warning); }
 .seo-app .seo-tile--bad  { border-left-color: var(--danger); }
+/* The gauge/donut already carries its own status color, so the tile's own
+   left-accent border would be a second, possibly-conflicting signal. */
+.seo-app .seo-tile--gauge, .seo-app .seo-tile--donut {
+  border-left-color: var(--border);
+  align-items: center;
+  justify-items: center;
+  text-align: center;
+  gap: 2px;
+}
 
 .seo-app .seo-tile__label {
   font: 600 12px/1.3 var(--font-sans);

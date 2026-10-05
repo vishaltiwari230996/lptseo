@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { InsightsView } from "./insights";
 import * as api from "@/lib/api";
 
@@ -27,9 +27,11 @@ describe("InsightsView", () => {
   });
 
   it("renders items sorted with critical first and shows source notes", async () => {
-    render(<InsightsView brandId="b1" onToast={vi.fn()} onNavigate={vi.fn()} />);
+    const { container } = render(<InsightsView brandId="b1" onToast={vi.fn()} onNavigate={vi.fn()} />);
     await waitFor(() => expect(screen.getByText(/Core Web Vitals are failing on mobile/)).toBeInTheDocument());
-    const items = screen.getAllByRole("listitem");
+    // Scoped to the action list, not the severity donut's own legend <li>s.
+    const list = container.querySelector(".seo-insights-panel__list") as HTMLElement;
+    const items = within(list).getAllByRole("listitem");
     expect(items[0]).toHaveTextContent("Core Web Vitals are failing on mobile");
     expect(screen.getByText(/Competitors: no report yet/)).toBeInTheDocument();
   });

@@ -26,6 +26,7 @@ import {
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
 import { Icon } from "@/lib/kit-ui";
+import { Donut, RadialGauge } from "./viz";
 
 const fmt = (n: number) => n.toLocaleString("en-IN");
 
@@ -62,12 +63,17 @@ export function DashboardTiles({ sitemap, vitals, pool, healthFindings }: Dashbo
 
   return (
     <div className="seo-tiles">
-      <Tile
-        label="Sitemap"
-        value={sitemap ? `${sitemap.score}` : "—"}
-        sub={sitemap ? `out of 100 · ${fmt(sitemap.url_count)} URLs` : "not audited yet"}
-        tone={!sitemap ? "none" : sitemap.score >= 85 ? "good" : sitemap.score >= 60 ? "warn" : "bad"}
-      />
+      <div className="seo-tile seo-tile--gauge">
+        <RadialGauge
+          value={sitemap ? sitemap.score : null}
+          label="Sitemap score"
+          size={68}
+          strokeWidth={6}
+        />
+        <span className="seo-tile__sub">
+          {sitemap ? `${fmt(sitemap.url_count)} URLs` : "not audited yet"}
+        </span>
+      </div>
       <Tile
         label="Core Web Vitals"
         value={
@@ -88,12 +94,25 @@ export function DashboardTiles({ sitemap, vitals, pool, healthFindings }: Dashbo
           : "none"
         }
       />
-      <Tile
-        label="Keywords tracked"
-        value={pool ? fmt(pool.totals.keywords) : "—"}
-        sub={pool ? `${fmt(pool.totals.ranked)} ranking · ${fmt(pool.bands.top3)} in top 3` : "not pooled yet"}
-        tone="none"
-      />
+      {pool ? (
+        <div className="seo-tile seo-tile--donut">
+          <span className="seo-tile__label">Keywords tracked</span>
+          <Donut
+            size={64} strokeWidth={8} showLegend={false}
+            centerValue={fmt(pool.totals.keywords)} centerLabel="keywords"
+            segments={[
+              { key: "top3", label: "Top 3", value: pool.bands.top3, tone: "good" },
+              { key: "page1", label: "Page 1", value: pool.bands.page1, tone: "mid" },
+              { key: "page2", label: "Page 2", value: pool.bands.page2, tone: "warn" },
+              { key: "beyond", label: "Beyond 20", value: pool.bands.beyond, tone: "flat" },
+              { key: "unranked", label: "Not ranking", value: pool.bands.unranked, tone: "bad" },
+            ]}
+          />
+          <span className="seo-tile__sub">{fmt(pool.bands.top3)} in top 3</span>
+        </div>
+      ) : (
+        <Tile label="Keywords tracked" value="—" sub="not pooled yet" tone="none" />
+      )}
       <Tile
         label="Opportunity"
         value={pool ? `+${fmt(pool.totals.opportunity)}` : "—"}
