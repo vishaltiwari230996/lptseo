@@ -512,21 +512,30 @@ def delta(brand_id: str, query: str, hours: int) -> int | None:
     return _delta_from(row, hours)
 
 
-def lost_ranking(brand_id: str, query: str, hours: int) -> bool:
+def _lost_ranking_from(history_row: dict, hours: int) -> bool:
     """True when the latest point is unranked and we were ranked within the window.
 
     This signals a dropout — a query we demonstrably ranked for and have now lost.
+    Called from worklist() with a pre-loaded history row to avoid redundant reads.
     """
-    row = history_for(brand_id, query)
-    if not row or not row.get("raw"):
+    if not history_row or not history_row.get("raw"):
         return False
-    raw = row["raw"]
+    raw = history_row["raw"]
     if not raw or raw[-1][1] is not None:
         # Either no history or currently ranked; no dropout.
         return False
     # Latest is unranked. Check if we were ranked somewhere in the window.
     cutoff = raw[-1][0] - hours
     return any(p[0] >= cutoff and p[1] is not None for p in raw[:-1])
+
+
+def lost_ranking(brand_id: str, query: str, hours: int) -> bool:
+    """True when the latest point is unranked and we were ranked within the window.
+
+    This signals a dropout — a query we demonstrably ranked for and have now lost.
+    """
+    row = history_for(brand_id, query)
+    return _lost_ranking_from(row, hours)
 
 
 def worklist(brand: dict, limit: int = 10) -> list[dict]:
@@ -565,7 +574,7 @@ def worklist(brand: dict, limit: int = 10) -> list[dict]:
         # Compute delta and dropout detection from loaded history.
         history_row = history_by_query.get(query_key)
         moved = _delta_from(history_row, hours=7 * 24)
-        dropped = lost_ranking(brand_id, result["query"], hours=7 * 24)
+        dropped = _lost_ranking_from(history_row, hours=7 * 24)
 
         # A live regression outranks a long-standing weakness.
         # A dropout is also high-priority (band=1.0, trend=1.6).

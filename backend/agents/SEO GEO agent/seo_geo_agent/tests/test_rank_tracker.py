@@ -865,3 +865,43 @@ def test_demand_curve_is_monotonic(monkeypatch):
     # Same position, same rivals → scores differ only by demand.
     scores = {r["query"]: r["score"] for r in rows}
     assert scores["five imp"] >= scores["one imp"]
+
+
+def test_worklist_loads_history_once_not_per_row(monkeypatch):
+    """Verify that worklist() calls jobs.load_list a constant number of times,
+    not once per row. This prevents a Firestore read storm on every panel GET."""
+    from seo_geo_agent import competitors, jobs as j
+    monkeypatch.setattr(competitors, "list_custom_queries", lambda bid: [])
+    monkeypatch.setattr(competitors, "tracked_keywords", lambda b: [])
+
+    # Seed 20 worklist-eligible queries (all with rivals above them).
+    queries = [f"q{n}" for n in range(20)]
+    rt.build_pool(_brand(), rows_fn=lambda b: (_rows(*[(q, 100) for q in queries]), []))
+    _seed_latest([
+        {"query": q, "position": 10, "url": "", "error": None,
+         "top": [{"position": 1, "domain": "rival.com", "url": "", "title": ""}]}
+        for q in queries
+    ])
+
+    # Create some history for half the queries.
+    for q in queries[:10]:
+        rt.append_history("b1", [_result(q, 8)], [], now=_at(1))
+        rt.append_history("b1", [_result(q, 10)], [], now=_at(5))
+
+    # Monkeypatch jobs.load_list to count calls.
+    call_count = [0]
+    original_load_list = j.load_list
+    def counting_load_list(*args, **kwargs):
+        call_count[0] += 1
+        return original_load_list(*args, **kwargs)
+    monkeypatch.setattr(j, "load_list", counting_load_list)
+
+    # Call worklist() — should load history once, not 20 times.
+    rows = rt.worklist(_brand())
+
+    # Expected calls: 1 for all_history, 1 for latest_rows = 2 constant calls
+    # (plus any pool reads, but those are unrelated to row count).
+    # We're specifically checking that lost_ranking and delta don't each
+    # trigger fresh history loads.
+    assert call_count[0] <= 3, f"Expected ≤3 load_list calls, got {call_count[0]}. History was loaded once per row."
+    assert len(rows) > 0  # Sanity check: worklist produced output
