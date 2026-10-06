@@ -16,7 +16,7 @@
  * So "no data" is written as a sentence explaining why, never as a zero.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import {
   seoKeywordPool, seoKeywordPoolRefresh, seoOauthStart,
   seoVitals, seoVitalsRefresh,
@@ -29,6 +29,74 @@ import { Icon } from "@/lib/kit-ui";
 import { Donut, RadialGauge } from "./viz";
 
 const fmt = (n: number) => n.toLocaleString("en-IN");
+
+/* --------------------------------- hero ------------------------------------ */
+
+/** Blends whatever signals have actually been run into one 0-100 reading.
+ *  Each component is optional and excluded (not zeroed) until its own audit
+ *  has run — a brand three days old with nothing pooled yet should read as
+ *  "not enough data", never as a bad score it never earned. */
+function computeHealthScore(
+  sitemap: SeoSitemapDoc | null,
+  vitals: SeoVitalsDoc | null,
+  pool: SeoKeywordPoolDoc | null,
+  healthFindings: number | null,
+): number | null {
+  const parts: number[] = [];
+
+  if (sitemap) parts.push(sitemap.score);
+
+  const cwv = vitals?.origin_vitals?.mobile?.assessment;
+  if (cwv === "passing") parts.push(100);
+  else if (cwv === "needs-improvement") parts.push(55);
+  else if (cwv === "failing") parts.push(15);
+
+  if (healthFindings != null) parts.push(Math.max(0, 100 - healthFindings * 12));
+
+  if (pool && pool.totals.keywords > 0) {
+    parts.push(((pool.bands.top3 + pool.bands.page1) / pool.totals.keywords) * 100);
+  }
+
+  if (!parts.length) return null;
+  return Math.round(parts.reduce((a, b) => a + b, 0) / parts.length);
+}
+
+export function BrandHero({
+  sitemap, vitals, pool, healthFindings, children,
+}: DashboardTilesProps & { children: ReactNode }) {
+  const score = computeHealthScore(sitemap, vitals, pool, healthFindings);
+  const pct = pool && pool.totals.keywords > 0
+    ? Math.round(((pool.bands.top3 + pool.bands.page1) / pool.totals.keywords) * 100)
+    : null;
+
+  return (
+    <div className="seo-hero">
+      <RadialGauge
+        value={score}
+        label="Site health"
+        size={132}
+        strokeWidth={11}
+      />
+      <div className="seo-hero__body">
+        {children}
+        {pool && pool.totals.keywords > 0 && (
+          <div className="seo-hero__visibility">
+            <Donut
+              size={56} strokeWidth={7} showLegend={false}
+              centerValue={pct != null ? `${pct}%` : "—"}
+              segments={[
+                { key: "top3", label: "Top 3", value: pool.bands.top3, tone: "good" },
+                { key: "page1", label: "Page 1", value: pool.bands.page1, tone: "mid" },
+                { key: "rest", label: "Elsewhere", value: pool.totals.keywords - pool.bands.top3 - pool.bands.page1, tone: "flat" },
+              ]}
+            />
+            <span className="seo-hero__visibility-label">visible on page 1</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /* ------------------------------ summary tiles ----------------------------- */
 

@@ -14,7 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { BrandMark, Icon } from "@/lib/kit-ui";
 import { describeFailure, useLoadSession } from "@/lib/load";
 import { AskView, AuditView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
-import { DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
+import { BrandHero, DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
 import { DeepAuditPanel } from "./deep";
 import { InsightsView } from "./insights";
 import { RankTrackerView } from "./ranktracker";
@@ -787,19 +787,32 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
               </div>
             </div>
 
-            <Story run={run} />
-
-            {/* The summary row. It renders whether or not anything has been
-                built yet — an un-audited tile reading "—" is the honest state,
-                and it is also the prompt to go and build it. */}
-            <DashboardTiles
+            {/* One ring, one verdict — the composite read a non-technical
+                owner actually wants, blending whatever's been run so far.
+                It renders with no data too: "—" is honest, never a fake zero. */}
+            <BrandHero
               sitemap={sitemapDoc}
               vitals={vitalsDoc}
               pool={poolDoc}
               healthFindings={siteReview ? siteReview.issues.length : null}
-            />
+            >
+              <Story run={run} />
+            </BrandHero>
 
             {run && <DegradedNotes notes={run.degraded} domain={brand.domain} />}
+
+            {/* The old per-metric tile row — real numbers a developer would
+                want, demoted behind a disclosure so they don't compete with
+                the hero on first glance. */}
+            <details className="seo-advanced">
+              <summary>Advanced — sitemap, Core Web Vitals, raw counts</summary>
+              <DashboardTiles
+                sitemap={sitemapDoc}
+                vitals={vitalsDoc}
+                pool={poolDoc}
+                healthFindings={siteReview ? siteReview.issues.length : null}
+              />
+            </details>
 
             {/* One section on screen at a time, chosen from the left rail.
                 Everything below is the same content the nine stacked folds

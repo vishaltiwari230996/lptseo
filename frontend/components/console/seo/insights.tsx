@@ -8,7 +8,8 @@ import { useCallback, useEffect, useState } from "react";
 import { seoPriorities, seoPrioritiesRefresh, type SeoPrioritiesDoc } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
-import { Donut } from "./viz";
+
+const SHOWN_BY_DEFAULT = 3;
 
 const SEVERITY_LABEL: Record<string, string> = {
   critical: "Critical",
@@ -28,10 +29,12 @@ export function InsightsView({ brandId, onToast, onNavigate }: {
   const [doc, setDoc] = useState<SeoPrioritiesDoc | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     let live = true;
     setLoaded(false);
+    setExpanded(false);
     seoPriorities(brandId)
       .then((r) => { if (live) { setDoc(r.priorities); setLoaded(true); } })
       .catch((exc) => {
@@ -55,40 +58,26 @@ export function InsightsView({ brandId, onToast, onNavigate }: {
     return <p className="seo-note">Loading insights…</p>;
   }
 
-  const critical = doc?.items.filter((i) => i.severity === "critical").length ?? 0;
-  const warning = doc?.items.filter((i) => i.severity === "warning").length ?? 0;
-  const suggestion = doc?.items.filter((i) => i.severity === "suggestion").length ?? 0;
+  const items = doc?.items ?? [];
+  const shown = expanded ? items : items.slice(0, SHOWN_BY_DEFAULT);
+  const hidden = items.length - shown.length;
 
   return (
     <div className="seo-insights-panel">
       <div className="seo-insights-panel__head">
-        <h2 className="mr-section__title">What to do next</h2>
+        <h2 className="mr-section__title">Do next</h2>
         <button className="seo-btn seo-btn--primary" onClick={refresh} disabled={busy}>
           {busy ? "Rebuilding…" : "Rebuild"}
         </button>
       </div>
 
-      {doc && doc.items.length > 0 && (
-        <div className="seo-insights-panel__severity">
-          <Donut
-            size={88} strokeWidth={12}
-            centerValue={String(doc.items.length)} centerLabel="open items"
-            segments={[
-              { key: "critical", label: "Critical", value: critical, tone: "bad" },
-              { key: "warning", label: "Warning", value: warning, tone: "warn" },
-              { key: "suggestion", label: "Suggestion", value: suggestion, tone: "flat" },
-            ]}
-          />
-        </div>
-      )}
-
-      {!doc || doc.items.length === 0 ? (
+      {items.length === 0 ? (
         <p className="seo-empty">Nothing urgent right now — every connected source is clean.</p>
       ) : (
         <ul className="seo-insights-panel__list">
-          {doc.items.map((item) => (
+          {shown.map((item, i) => (
             <li key={item.id} className={`seo-insights-panel__item seo-insights-panel__item--${item.severity}`}>
-              <span className={`seo-chip seo-chip--${item.severity}`}>{SEVERITY_LABEL[item.severity]}</span>
+              <span className="seo-insights-panel__rank" title={SEVERITY_LABEL[item.severity]}>{i + 1}</span>
               <div className="seo-insights-panel__body">
                 <strong>{item.title}</strong>
                 <p className="seo-note">{item.why_it_matters}</p>
@@ -98,11 +87,17 @@ export function InsightsView({ brandId, onToast, onNavigate }: {
                 className="seo-insights-panel__link"
                 onClick={() => onNavigate(item.action_link.replace(/^#/, ""))}
               >
-                View →
+                View
               </button>
             </li>
           ))}
         </ul>
+      )}
+
+      {hidden > 0 && (
+        <button type="button" className="seo-insights-panel__more" onClick={() => setExpanded(true)}>
+          Show {hidden} more
+        </button>
       )}
 
       {doc && doc.notes.length > 0 && (
