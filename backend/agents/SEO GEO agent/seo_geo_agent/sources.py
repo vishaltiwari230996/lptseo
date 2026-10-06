@@ -478,6 +478,22 @@ def domain_of(url: str) -> str:
 
 # ------------------------------- LLM adapter -------------------------------
 
+def _clean_llm_error(exc: Exception) -> str:
+    """The OpenAI SDK (OpenRouter is OpenAI-compatible) stringifies a failed
+    call as ``Error code: 402 - {'error': {'message': ..., 'metadata': {...}}}``
+    — a raw JSON dump that ends up verbatim in a business owner's dashboard.
+    Its typed exceptions carry the parsed body separately, so pull out the
+    provider's own one-line message instead of the whole blob."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        inner = body.get("error")
+        if isinstance(inner, dict):
+            message = inner.get("message")
+            if isinstance(message, str) and message.strip():
+                return message.strip()
+    return str(exc)
+
+
 def llm_text(system: str, prompt: str, *, agent_id: str | None = None, fast: bool = True) -> str:
     """One LLM completion returned as plain text. Raises ``CredentialMissing``
     when offline or the provider fails, so callers surface an honest message.
@@ -493,7 +509,7 @@ def llm_text(system: str, prompt: str, *, agent_id: str | None = None, fast: boo
         ).content
         return str(raw).strip()
     except Exception as exc:  # noqa: BLE001
-        raise CredentialMissing(f"LLM unavailable: {exc}") from exc
+        raise CredentialMissing(f"LLM unavailable: {_clean_llm_error(exc)}") from exc
 
 
 def llm_json(system: str, prompt: str, *, agent_id: str | None = None, fast: bool = True):
@@ -513,7 +529,7 @@ def llm_json(system: str, prompt: str, *, agent_id: str | None = None, fast: boo
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
         return json.loads(text)
     except Exception as exc:  # noqa: BLE001 — bad JSON, no key, provider down: all degrade
-        raise CredentialMissing(f"LLM unavailable: {exc}") from exc
+        raise CredentialMissing(f"LLM unavailable: {_clean_llm_error(exc)}") from exc
 
 
 # ------------------------------ page fetcher ------------------------------

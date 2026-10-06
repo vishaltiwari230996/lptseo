@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from unittest.mock import Mock, patch
 
+import httpx
+from openai import APIStatusError
+
 from seo_geo_agent import sources
-from seo_geo_agent.sources import CredentialMissing
+from seo_geo_agent.sources import CredentialMissing, _clean_llm_error
 
 
 def test_brand_rank_unavailable_without_key(monkeypatch):
@@ -129,3 +132,44 @@ def test_brand_rank_search_page_2_is_sent_and_offsets_nothing_itself(monkeypatch
 
     assert sent["page"] == 2
     assert result["organic"][0]["position"] == 1  # untouched — not offset here
+
+
+def _fake_openrouter_402() -> APIStatusError:
+    """Matches the real shape: the openai SDK (OpenRouter is OpenAI-compatible)
+    stringifies this as 'Error code: 402 - {raw dict}' — not fit for a
+    business owner's dashboard."""
+    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    body = {
+        "error": {
+            "message": "Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+            "code": 402,
+            "metadata": {"limit_source": "openrouter_credits"},
+        }
+    }
+    resp = httpx.Response(402, request=req, json=body)
+    return APIStatusError(f"Error code: 402 - {body}", response=resp, body=body)
+
+
+def test_clean_llm_error_extracts_the_providers_own_message():
+    assert _clean_llm_error(_fake_openrouter_402()) == (
+        "Insufficient credits. Add more using https://openrouter.ai/settings/credits"
+    )
+
+
+def test_clean_llm_error_falls_back_to_str_for_unstructured_errors():
+    assert _clean_llm_error(ValueError("boom")) == "boom"
+
+
+def test_llm_text_surfaces_the_clean_message_not_the_raw_json_dump(monkeypatch):
+    monkeypatch.setenv("SEO_ALLOW_NETWORK", "1")
+    fake_llm = Mock()
+    fake_llm.invoke.side_effect = _fake_openrouter_402()
+
+    with patch("app.services.openrouter.get_llm", return_value=fake_llm):
+        try:
+            sources.llm_text("system", "prompt")
+            assert False, "expected CredentialMissing"
+        except CredentialMissing as caught:
+            assert "Insufficient credits" in str(caught)
+            assert "Error code: 402" not in str(caught)
+            assert "{'error'" not in str(caught)
