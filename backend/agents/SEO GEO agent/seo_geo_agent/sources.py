@@ -482,15 +482,18 @@ def _clean_llm_error(exc: Exception) -> str:
     """The OpenAI SDK (OpenRouter is OpenAI-compatible) stringifies a failed
     call as ``Error code: 402 - {'error': {'message': ..., 'metadata': {...}}}``
     — a raw JSON dump that ends up verbatim in a business owner's dashboard.
-    Its typed exceptions carry the parsed body separately, so pull out the
-    provider's own one-line message instead of the whole blob."""
+    Its typed exceptions carry the parsed body separately — BUT the SDK's own
+    ``_make_status_error`` (openai/_client.py) already unwraps the response's
+    outer ``"error"`` key before setting ``.body`` (``body.get("error", body)``),
+    so ``exc.body`` IS the inner ``{"message": ..., "code": ...}`` dict, not
+    the ``{"error": {...}}`` wrapper — verified against the real SDK, not
+    assumed. Reaching for ``body["error"]["message"]`` here would silently
+    always miss and fall through to the raw dump."""
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
-        inner = body.get("error")
-        if isinstance(inner, dict):
-            message = inner.get("message")
-            if isinstance(message, str) and message.strip():
-                return message.strip()
+        message = body.get("message")
+        if isinstance(message, str) and message.strip():
+            return message.strip()
     return str(exc)
 
 

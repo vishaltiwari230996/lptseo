@@ -135,19 +135,35 @@ def test_brand_rank_search_page_2_is_sent_and_offsets_nothing_itself(monkeypatch
 
 
 def _fake_openrouter_402() -> APIStatusError:
-    """Matches the real shape: the openai SDK (OpenRouter is OpenAI-compatible)
-    stringifies this as 'Error code: 402 - {raw dict}' — not fit for a
-    business owner's dashboard."""
-    req = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    body = {
+    """Drives the REAL openai SDK through a mock transport rather than
+    hand-building an APIStatusError — a hand-built fixture is exactly what let
+    the first version of this fix ship broken: it guessed ``.body`` would be
+    ``{"error": {...}}``, but ``openai._client._make_status_error`` actually
+    does ``body.get("error", body)`` before attaching it, so the real
+    ``.body`` is already the *inner* dict. Only exercising the real client
+    catches that kind of mismatch."""
+    import openai
+
+    wire_body = {
         "error": {
             "message": "Insufficient credits. Add more using https://openrouter.ai/settings/credits",
             "code": 402,
             "metadata": {"limit_source": "openrouter_credits"},
         }
     }
-    resp = httpx.Response(402, request=req, json=body)
-    return APIStatusError(f"Error code: 402 - {body}", response=resp, body=body)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, json=wire_body)
+
+    client = openai.OpenAI(
+        api_key="fake", base_url="https://openrouter.ai/api/v1",
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    try:
+        client.chat.completions.create(model="test", messages=[{"role": "user", "content": "hi"}])
+    except APIStatusError as exc:
+        return exc
+    raise AssertionError("expected the mock transport to raise APIStatusError")
 
 
 def test_clean_llm_error_extracts_the_providers_own_message():
