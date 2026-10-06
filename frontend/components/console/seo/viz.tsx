@@ -19,8 +19,10 @@ export interface RadialGaugeProps {
   size?: number;
   strokeWidth?: number;
   /** "auto" colors the ring from `goodAt`/`warnAt` thresholds (health-style
-   *  scores, where higher is better). "neutral" always draws brand-colored —
-   *  for stats like visibility % that aren't a pass/fail judgment. */
+   *  scores, where higher is better). "neutral" always draws in the blue
+   *  accent — for stats like visibility % that aren't a pass/fail judgment.
+   *  Deliberately NOT this app's `--brand` red: a neutral reading should
+   *  never look like an alarm. */
   tone?: "auto" | "neutral";
   goodAt?: number;
   warnAt?: number;
@@ -44,19 +46,21 @@ export function RadialGauge({
 
   return (
     <div className="seo-gauge" role="img" aria-label={`${label}: ${known ? display ?? pct : "no data"}`}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <circle cx={c} cy={c} r={r} className="seo-gauge__track" strokeWidth={strokeWidth} fill="none" />
-        {known && (
-          <circle
-            cx={c} cy={c} r={r} className={`seo-gauge__arc ${colorClass}`} strokeWidth={strokeWidth} fill="none"
-            strokeDasharray={`${dash} ${circumference - dash}`}
-            strokeLinecap="round"
-            transform={`rotate(-90 ${c} ${c})`}
-          />
-        )}
-      </svg>
-      <div className="seo-gauge__center">
-        <span className={`seo-gauge__value ${colorClass}`}>{known ? display ?? pct : "—"}</span>
+      <div className="seo-gauge__ring" style={{ width: size, height: size }}>
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle cx={c} cy={c} r={r} className="seo-gauge__track" strokeWidth={strokeWidth} fill="none" />
+          {known && (
+            <circle
+              cx={c} cy={c} r={r} className={`seo-gauge__arc ${colorClass}`} strokeWidth={strokeWidth} fill="none"
+              strokeDasharray={`${dash} ${circumference - dash}`}
+              strokeLinecap="round"
+              transform={`rotate(-90 ${c} ${c})`}
+            />
+          )}
+        </svg>
+        <div className="seo-gauge__center">
+          <span className={`seo-gauge__value ${colorClass}`}>{known ? display ?? pct : "—"}</span>
+        </div>
       </div>
       <span className="seo-gauge__label">{label}</span>
     </div>
@@ -69,9 +73,10 @@ export interface DonutSegment {
   key: string;
   label: string;
   value: number;
-  /** One of the --seo-donut-* CSS custom properties defined in seo.css,
-   *  e.g. "good" | "mid" | "warn" | "bad" | "flat". Keeps every donut on the
-   *  same palette instead of each caller picking its own colors. */
+  /** "mid" is the blue accent, not this app's red `--brand` — a chart with a
+   *  red "bad" segment needs its middle tone to stay visually distinct, not
+   *  nearly the same hue. Keeps every donut on the same restrained palette
+   *  instead of each caller picking its own colors. */
   tone: "good" | "mid" | "warn" | "bad" | "flat";
 }
 
@@ -80,7 +85,10 @@ export function Donut({
 }: {
   segments: DonutSegment[];
   centerValue: string;
-  centerLabel: string;
+  /** Omit on compact (tile-sized) rings — there's no room for a second line
+   *  without it crowding the ring, and the surrounding tile already carries
+   *  its own label. */
+  centerLabel?: string;
   size?: number;
   strokeWidth?: number;
   showLegend?: boolean;
@@ -113,7 +121,7 @@ export function Donut({
     <div className="seo-donut-wrap">
       <div
         className="seo-donut" role="img"
-        aria-label={`${centerLabel}: ${centerValue}. ${segments.map((s) => `${s.label} ${s.value}`).join(", ")}`}
+        aria-label={`${centerLabel ?? ""}: ${centerValue}. ${segments.map((s) => `${s.label} ${s.value}`).join(", ")}`}
       >
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <circle cx={c} cy={c} r={r} className="seo-donut__track" strokeWidth={strokeWidth} fill="none" />
@@ -121,7 +129,7 @@ export function Donut({
         </svg>
         <div className="seo-donut__center">
           <span className="seo-donut__value">{centerValue}</span>
-          <span className="seo-donut__sub">{centerLabel}</span>
+          {centerLabel && <span className="seo-donut__sub">{centerLabel}</span>}
         </div>
       </div>
       {showLegend && (

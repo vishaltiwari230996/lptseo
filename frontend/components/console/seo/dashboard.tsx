@@ -67,8 +67,8 @@ export function DashboardTiles({ sitemap, vitals, pool, healthFindings }: Dashbo
         <RadialGauge
           value={sitemap ? sitemap.score : null}
           label="Sitemap score"
-          size={68}
-          strokeWidth={6}
+          size={72}
+          strokeWidth={7}
         />
         <span className="seo-tile__sub">
           {sitemap ? `${fmt(sitemap.url_count)} URLs` : "not audited yet"}
@@ -98,8 +98,8 @@ export function DashboardTiles({ sitemap, vitals, pool, healthFindings }: Dashbo
         <div className="seo-tile seo-tile--donut">
           <span className="seo-tile__label">Keywords tracked</span>
           <Donut
-            size={64} strokeWidth={8} showLegend={false}
-            centerValue={fmt(pool.totals.keywords)} centerLabel="keywords"
+            size={72} strokeWidth={7} showLegend={false}
+            centerValue={fmt(pool.totals.keywords)}
             segments={[
               { key: "top3", label: "Top 3", value: pool.bands.top3, tone: "good" },
               { key: "page1", label: "Page 1", value: pool.bands.page1, tone: "mid" },

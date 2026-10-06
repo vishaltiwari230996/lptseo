@@ -864,9 +864,10 @@ a.seo-pages__path:hover { color: var(--green-500); }
    than pulling in a charting library for two shapes. */
 
 .seo-gauge { display: grid; justify-items: center; gap: 4px; }
+.seo-gauge__ring { position: relative; flex: none; }
 .seo-gauge svg { display: block; }
 .seo-gauge__track { stroke: var(--border); }
-.seo-gauge__center { position: relative; margin-top: calc(-1 * var(--seo-gauge-h, 72px)); height: var(--seo-gauge-h, 72px); display: grid; place-items: center; }
+.seo-gauge__center { position: absolute; inset: 0; display: grid; place-items: center; }
 .seo-gauge__value { font: 700 17px/1 var(--font-display); font-variant-numeric: tabular-nums; }
 .seo-gauge__label { font: 500 11px/1.3 var(--font-sans); color: var(--text-tertiary); text-align: center; }
 .seo-gauge__arc.seo-gauge--good, .seo-gauge__value.seo-gauge--good { color: var(--green-600); }
@@ -875,8 +876,8 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-gauge__arc.seo-gauge--warn { stroke: var(--amber-500); }
 .seo-gauge__arc.seo-gauge--bad, .seo-gauge__value.seo-gauge--bad { color: var(--red-600); }
 .seo-gauge__arc.seo-gauge--bad { stroke: var(--red-500); }
-.seo-gauge__arc.seo-gauge--neutral, .seo-gauge__value.seo-gauge--neutral { color: var(--brand); }
-.seo-gauge__arc.seo-gauge--neutral { stroke: var(--brand); }
+.seo-gauge__arc.seo-gauge--neutral, .seo-gauge__value.seo-gauge--neutral { color: var(--accent-500); }
+.seo-gauge__arc.seo-gauge--neutral { stroke: var(--accent-500); }
 .seo-gauge__value.seo-gauge--none { color: var(--text-tertiary); }
 
 .seo-donut-wrap { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
@@ -885,7 +886,7 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-donut__track { stroke: var(--border); }
 .seo-donut__arc { transition: stroke-dashoffset 0.2s ease; }
 .seo-donut__arc--good { stroke: var(--green-500); }
-.seo-donut__arc--mid { stroke: var(--brand); }
+.seo-donut__arc--mid { stroke: var(--accent-500); }
 .seo-donut__arc--warn { stroke: var(--amber-500); }
 .seo-donut__arc--bad { stroke: var(--red-500); }
 .seo-donut__arc--flat { stroke: var(--text-tertiary); }
@@ -898,7 +899,7 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-donut__legend-row { display: flex; align-items: center; gap: 7px; font: 500 12px/1.3 var(--font-sans); }
 .seo-donut__swatch { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .seo-donut__swatch--good { background: var(--green-500); }
-.seo-donut__swatch--mid { background: var(--brand); }
+.seo-donut__swatch--mid { background: var(--accent-500); }
 .seo-donut__swatch--warn { background: var(--amber-500); }
 .seo-donut__swatch--bad { background: var(--red-500); }
 .seo-donut__swatch--flat { background: var(--text-tertiary); }
