@@ -694,7 +694,12 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                   </button>
                 </div>
               ))}
-              <AddBrandForm onSaved={() => void refreshOverview()} onToast={onToast} />
+              {/* Brand records hold GSC property + GA pinning + competitor
+                  config — creator-only on the backend, so only creators get
+                  the form (anyone else would just see a 403). */}
+              {user?.is_creator && (
+                <AddBrandForm onSaved={() => void refreshOverview()} onToast={onToast} />
+              )}
             </div>
           </div>
         )}

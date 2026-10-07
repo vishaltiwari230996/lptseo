@@ -268,3 +268,41 @@ def test_brief_route_returns_the_five_blocks(client, monkeypatch):
     monkeypatch.setattr(digests.rank_tracker, "annotate_rows", lambda brand: [])
     body = client.get("/api/seo-geo/brief/b1").json()["brief"]
     assert set(body) >= {"current_rank", "working", "not_working", "immediate", "secondary", "notes"}
+
+
+# ----------------------------- brand save guard -----------------------------
+
+def test_brand_save_is_creator_only(monkeypatch):
+    """A signed-in non-creator must NOT be able to upsert a brand: the record
+    carries the GSC property, GA pinning and competitor config, and upsert is
+    last-writer-wins. (Found by the push security review.)"""
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "u2", "email": "e@x.com", "is_creator": False}
+    try:
+        c = TestClient(app)
+        resp = c.post("/api/seo-geo/brands", json={
+            "id": "b1", "name": "Hijack", "domain": "evil.com",
+            "gsc_property": "", "seeds": [], "enabled": True})
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_brand_edit_preserves_fields_the_form_does_not_carry(client, monkeypatch):
+    from seo_geo_agent import insights
+
+    saved = {}
+    monkeypatch.setattr(insights, "upsert_brand", lambda b: saved.update(b) or [b])
+    monkeypatch.setattr(insights, "list_brands", lambda: [{
+        "id": "lpt", "name": "Law Prep", "domain": "lawpreptutorial.com",
+        "gsc_property": "sc-domain:lawpreptutorial.com", "seeds": ["clat"],
+        "enabled": True, "competitors": ["careers360.com"],
+        "ga4_property": "properties/123", "serp_country": "in"}])
+    resp = client.post("/api/seo-geo/brands", json={
+        "id": "lpt", "name": "Law Prep Tutorial", "domain": "lawpreptutorial.com",
+        "gsc_property": "", "seeds": ["clat coaching"], "enabled": True})
+    assert resp.status_code == 200
+    assert saved["competitors"] == ["careers360.com"]   # survived the edit
+    assert saved["ga4_property"] == "properties/123"
+    assert saved["serp_country"] == "in"
+    assert saved["seeds"] == ["clat coaching"]          # payload still wins

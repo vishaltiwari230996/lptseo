@@ -157,7 +157,7 @@ def overview(user=Depends(get_current_user)):
 
 
 @router.post("/seo-geo/brands")
-def save_brand(payload: BrandIn, user=Depends(get_current_user),
+def save_brand(payload: BrandIn, user=Depends(require_creator),
                act: Activity = trail.records("brand_saved", "Saved a brand", unit=CHANGE)):
     # Shared with the GEO editor's self-serve create route: one answer to "what
     # is a valid brand id / domain", in the module that owns brand records. The
@@ -169,7 +169,9 @@ def save_brand(payload: BrandIn, user=Depends(get_current_user),
         domain = insights.normalize_domain(payload.domain)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    existing = next((b for b in insights.list_brands() if b["id"] == slug), {})
     brand = {
+        **existing,  # competitors, ga4_property, serp_country… survive an edit
         "id": slug,
         "name": payload.name.strip() or slug,
         "domain": domain,
