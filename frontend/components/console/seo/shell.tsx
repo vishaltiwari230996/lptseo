@@ -8,6 +8,35 @@ export interface SidebarSection {
   hint?: string;
 }
 
+/** The Daily / Deep-analysis toggle above the shell. Generic like `Shell`:
+ *  it renders whatever workspaces it is handed and knows nothing about what
+ *  they contain. A tablist, because that is what it is — two mutually
+ *  exclusive views of the same brand. */
+export function WorkspaceSwitch({
+  workspaces, activeId, onSelect,
+}: {
+  workspaces: { id: string; label: string }[];
+  activeId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="seo-wswitch" role="tablist" aria-label="Console workspace">
+      {workspaces.map((w) => (
+        <button
+          key={w.id}
+          type="button"
+          role="tab"
+          aria-selected={w.id === activeId}
+          className={`seo-wswitch__tab${w.id === activeId ? " seo-wswitch__tab--active" : ""}`}
+          onClick={() => { if (w.id !== activeId) onSelect(w.id); }}
+        >
+          {w.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Shell({
   sections, activeId, onSelect, children,
 }: {

@@ -13,52 +13,31 @@ import type { ToastFn } from "@/components/console/ConsoleApp";
 import { useAuth } from "@/lib/auth";
 import { BrandMark, Icon } from "@/lib/kit-ui";
 import { describeFailure, useLoadSession } from "@/lib/load";
-import { AskView, AuditView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
+import { AskView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
 import { BrandHero, DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
-import { DeepAuditPanel } from "./deep";
+import { DeepWorkspace } from "./deep";
 import { InsightsView } from "./insights";
+import { RankBoardView } from "./rankboard";
 import { RankTrackerView } from "./ranktracker";
-import { Shell, type SidebarSection } from "./shell";
+import {
+  DAILY_SECTIONS, DEEP_SECTIONS, WORKSPACES, resolveSection,
+  type DailySectionId, type DeepSectionId, type Workspace,
+} from "./sections";
+import { Shell, WorkspaceSwitch } from "./shell";
 import { Donut } from "./viz";
 
 /* "Keyword lab" used to live here too; it now sits in the Keywords section,
-   next to the pool it feeds, rather than behind a second switcher. */
-type SeoTool = "ask" | "briefs" | "audit";
+   next to the pool it feeds, rather than behind a second switcher. "Site
+   audit" (the old 80-page audit.py surface) is gone from the UI: the Deep
+   analysis workspace covers everything it checked, on every URL, with
+   evidence — two audits answering one question was the confusion this split
+   exists to remove. Its backend stays: draft scoring still runs on it. */
+type SeoTool = "ask" | "briefs";
 
 const TOOL_LABELS: Record<SeoTool, string> = {
   ask: "Ask the analyst",
   briefs: "Content briefs",
-  audit: "Site audit",
 };
-
-/** The console's left rail. Ids are a contract: the backend's priority items
- *  link to `#vitals`, `#keywords`, `#deep-audit` and `#traffic`, so those four
- *  ids must keep spelling exactly as they do here. */
-const SECTIONS: SidebarSection[] = [
-  { id: "insights", label: "Insights" },
-  { id: "traffic", label: "Traffic & rankings" },
-  { id: "health", label: "Website health" },
-  { id: "keywords", label: "Keywords" },
-  { id: "competitors", label: "Competitors" },
-  { id: "rank-tracker", label: "Rank tracker" },
-  { id: "vitals", label: "Core Web Vitals" },
-  { id: "deep-audit", label: "Deep audit" },
-  { id: "pages", label: "Pages" },
-  { id: "tools", label: "Tools" },
-];
-
-/** The nine ids above, as a union — kept separate from `SidebarSection`'s
- *  plain `string` id so `Shell` (a generic reusable container that knows
- *  nothing about this app's sections) doesn't have to. Any id that isn't one
- *  of these — e.g. a stale persisted `priorities` doc's `action_link` after a
- *  future id rename — is treated as unrecognized and falls back to Insights,
- *  both at the type level (`activeSection`'s state) and at runtime (see
- *  `navigateToSection` below). */
-type SectionId = "insights" | "traffic" | "health" | "keywords" | "competitors" | "rank-tracker" | "vitals" | "deep-audit" | "pages" | "tools";
-
-function isSectionId(id: string): id is SectionId {
-  return SECTIONS.some((s) => s.id === id);
-}
 
 /** SEO agent (a2) — per-brand insights, traffic-estimated to-dos, blog topic lab. */
 
@@ -394,15 +373,23 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
   const [tool, setTool] = useState<SeoTool | null>(null);
   const [busy, setBusy] = useState(false);
   const [showAvoided, setShowAvoided] = useState(false);
-  /** Which sidebar section is on screen. */
-  const [activeSection, setActiveSection] = useState<SectionId>("insights");
+  /** Which workspace is on screen, and each workspace's own selection —
+   *  remembered separately so toggling Daily ↔ Deep returns to where the
+   *  reader left off, not to the first item. */
+  const [workspace, setWorkspace] = useState<Workspace>("daily");
+  const [dailySection, setDailySection] = useState<DailySectionId>("insights");
+  const [deepSection, setDeepSection] = useState<DeepSectionId>("overview");
 
-  /** Routes to a section by id, falling back to Insights for anything that
-   *  isn't one of the nine known ids — the sidebar's own `onSelect` only ever
-   *  passes a real id, but `InsightsView`'s `onNavigate` passes whatever a
-   *  priority item's `action_link` says, which could be stale. */
+  /** Routes to a section by id — switching workspace when the target lives in
+   *  the other one. The sidebar's own `onSelect` only ever passes a real id,
+   *  but `InsightsView`'s `onNavigate` passes whatever a persisted priority
+   *  item's `action_link` says, which can be stale (`resolveSection` maps
+   *  legacy ids and falls back to Daily → Insights). */
   const navigateToSection = useCallback((id: string) => {
-    setActiveSection(isSectionId(id) ? id : "insights");
+    const target = resolveSection(id);
+    setWorkspace(target.workspace);
+    if (target.workspace === "daily") setDailySection(target.section);
+    else setDeepSection(target.section);
   }, []);
 
   const session = useLoadSession();
@@ -443,7 +430,9 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
       setGsc(detail.gsc ?? null);
       setSiteReview(detail.site_review ?? null);
       setTool(null);
-      setActiveSection("insights");
+      setWorkspace("daily");
+      setDailySection("insights");
+      setDeepSection("overview");
       setPagesDoc(null);
       setPagesError(null);
       setSitemapDoc(null);
@@ -787,44 +776,126 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
               </div>
             </div>
 
-            {/* One ring, one verdict — the composite read a non-technical
-                owner actually wants, blending whatever's been run so far.
-                It renders with no data too: "—" is honest, never a fake zero. */}
-            <BrandHero
-              sitemap={sitemapDoc}
-              vitals={vitalsDoc}
-              pool={poolDoc}
-              healthFindings={siteReview ? siteReview.issues.length : null}
+            {/* Daily and Deep analysis are two workspaces over one brand:
+                the day-to-day read (hero ring, insights, traffic, keywords)
+                and the audit read (the crawl diagnostics, vitals, the expert
+                review). They used to interleave on one screen; the switch
+                keeps each kind of result with its own kind. */}
+            {/* Switching workspaces keeps each side's remembered selection —
+                so this sets only the workspace, never a section. */}
+            <WorkspaceSwitch workspaces={WORKSPACES} activeId={workspace}
+                             onSelect={(id) => setWorkspace(id as Workspace)} />
+
+            {workspace === "daily" && (
+              <>
+                {/* One ring, one verdict — the composite read a non-technical
+                    owner actually wants, blending whatever's been run so far.
+                    It renders with no data too: "—" is honest, never a fake zero. */}
+                <BrandHero
+                  sitemap={sitemapDoc}
+                  vitals={vitalsDoc}
+                  pool={poolDoc}
+                  healthFindings={siteReview ? siteReview.issues.length : null}
+                >
+                  <Story run={run} />
+                </BrandHero>
+
+                {run && <DegradedNotes notes={run.degraded} domain={brand.domain} />}
+
+                {/* The old per-metric tile row — real numbers a developer would
+                    want, demoted behind a disclosure so they don't compete with
+                    the hero on first glance. */}
+                <details className="seo-advanced">
+                  <summary>Advanced — sitemap, Core Web Vitals, raw counts</summary>
+                  <DashboardTiles
+                    sitemap={sitemapDoc}
+                    vitals={vitalsDoc}
+                    pool={poolDoc}
+                    healthFindings={siteReview ? siteReview.issues.length : null}
+                  />
+                </details>
+              </>
+            )}
+
+            {/* One section on screen at a time, chosen from the left rail. */}
+            <Shell
+              sections={workspace === "daily" ? DAILY_SECTIONS : DEEP_SECTIONS}
+              activeId={workspace === "daily" ? dailySection : deepSection}
+              onSelect={navigateToSection}
             >
-              <Story run={run} />
-            </BrandHero>
+              {workspace === "deep" && (
+                <div className="seo-section">
+                  <DeepWorkspace brandId={brand.id} section={deepSection} onToast={onToast}>
+                    {deepSection === "vitals" && (
+                      <VitalsView brandId={brand.id} doc={vitalsDoc} available={vitalsAvailable}
+                                  onLoaded={setVitalsDoc} onToast={onToast} />
+                    )}
+                    {deepSection === "health" && (
+                      !siteReview ? (
+                        <div className="seo-empty">
+                          No expert review yet — hit “Analyze website” above to crawl the
+                          site and score it.
+                        </div>
+                      ) : (
+                        <div className="mr-section">
+                          <h3 className="mr-section__title">What the expert review found · {siteReview.at}</h3>
+                          {siteReview.positioning && <div className="seo-poa__action">{siteReview.positioning}</div>}
+                          {siteReview.scorecard && Object.keys(siteReview.scorecard).length > 0 && (
+                            <div className="seo-cluster__kws">
+                              {Object.entries(siteReview.scorecard).map(([key, cell]) => {
+                                const label = {
+                                  intent: "Intent", content_depth: "Content depth", architecture: "Architecture",
+                                  trust: "Trust", conversion: "Conversion", ai_search: "AI search",
+                                }[key] ?? key;
+                                const cls = cell.grade >= 4 ? "seo-chip--on" : "";
+                                return (
+                                  <span key={key} className={`seo-chip ${cls}`} title={cell.note}>
+                                    {label} {cell.grade}/5
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
+                          {siteReview.strengths.length > 0 && (
+                            <div className="seo-cluster__kws">
+                              {siteReview.strengths.map((s) => (
+                                <span key={s} className="seo-chip seo-chip--on">{s}</span>
+                              ))}
+                            </div>
+                          )}
+                          {siteReview.missing_topics.length > 0 && (
+                            <>
+                              <div className="seo-lab__meta">Topics the site doesn&apos;t cover yet — blog fuel:</div>
+                              <div className="seo-cluster__kws">
+                                {siteReview.missing_topics.map((t) => (
+                                  <span key={t} className="seo-chip seo-chip--cov-gap">{t}</span>
+                                ))}
+                              </div>
+                            </>
+                          )}
+                          <div className="seo-lab__meta">
+                            Findings are ranked with everything else in Insights — nothing to read twice.
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </DeepWorkspace>
+                </div>
+              )}
 
-            {run && <DegradedNotes notes={run.degraded} domain={brand.domain} />}
-
-            {/* The old per-metric tile row — real numbers a developer would
-                want, demoted behind a disclosure so they don't compete with
-                the hero on first glance. */}
-            <details className="seo-advanced">
-              <summary>Advanced — sitemap, Core Web Vitals, raw counts</summary>
-              <DashboardTiles
-                sitemap={sitemapDoc}
-                vitals={vitalsDoc}
-                pool={poolDoc}
-                healthFindings={siteReview ? siteReview.issues.length : null}
-              />
-            </details>
-
-            {/* One section on screen at a time, chosen from the left rail.
-                Everything below is the same content the nine stacked folds
-                used to hold — only the wrapper changed. */}
-            <Shell sections={SECTIONS} activeId={activeSection} onSelect={navigateToSection}>
-              {activeSection === "insights" && (
+              {workspace === "daily" && dailySection === "insights" && (
                 <div className="seo-section">
                   <InsightsView brandId={brand.id} onToast={onToast} onNavigate={navigateToSection} />
                 </div>
               )}
 
-              {activeSection === "traffic" && (
+              {workspace === "daily" && dailySection === "rank-board" && (
+                <div className="seo-section">
+                  <RankBoardView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
+                </div>
+              )}
+
+              {workspace === "daily" && dailySection === "traffic" && (
                 <div className="seo-section">
                   {!run ? (
                     <div className="seo-empty">
@@ -904,59 +975,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                 </div>
               )}
 
-              {activeSection === "health" && (
-                <div className="seo-section">
-                  {!siteReview ? (
-                    <div className="seo-empty">
-                      No expert review yet — hit “Analyze website” above to crawl the
-                      site and score it.
-                    </div>
-                  ) : (
-                    <div className="mr-section">
-                      <h3 className="mr-section__title">What the expert review found · {siteReview.at}</h3>
-                      {siteReview.positioning && <div className="seo-poa__action">{siteReview.positioning}</div>}
-                      {siteReview.scorecard && Object.keys(siteReview.scorecard).length > 0 && (
-                        <div className="seo-cluster__kws">
-                          {Object.entries(siteReview.scorecard).map(([key, cell]) => {
-                            const label = {
-                              intent: "Intent", content_depth: "Content depth", architecture: "Architecture",
-                              trust: "Trust", conversion: "Conversion", ai_search: "AI search",
-                            }[key] ?? key;
-                            const cls = cell.grade >= 4 ? "seo-chip--on" : "";
-                            return (
-                              <span key={key} className={`seo-chip ${cls}`} title={cell.note}>
-                                {label} {cell.grade}/5
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                      {siteReview.strengths.length > 0 && (
-                        <div className="seo-cluster__kws">
-                          {siteReview.strengths.map((s) => (
-                            <span key={s} className="seo-chip seo-chip--on">{s}</span>
-                          ))}
-                        </div>
-                      )}
-                      {siteReview.missing_topics.length > 0 && (
-                        <>
-                          <div className="seo-lab__meta">Topics the site doesn&apos;t cover yet — blog fuel:</div>
-                          <div className="seo-cluster__kws">
-                            {siteReview.missing_topics.map((t) => (
-                              <span key={t} className="seo-chip seo-chip--cov-gap">{t}</span>
-                            ))}
-                          </div>
-                        </>
-                      )}
-                      <div className="seo-lab__meta">
-                        Findings are ranked with everything else in Insights — nothing to read twice.
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {activeSection === "keywords" && (
+              {workspace === "daily" && dailySection === "keywords" && (
                 <div className="seo-section">
                   <KeywordPoolView
                     brandId={brand.id}
@@ -1027,39 +1046,26 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                 </div>
               )}
 
-              {activeSection === "competitors" && (
+              {workspace === "daily" && dailySection === "competitors" && (
                 <div className="seo-section">
                   <CompetitorsView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
                 </div>
               )}
 
-              {activeSection === "rank-tracker" && (
+              {workspace === "daily" && dailySection === "rank-tracker" && (
                 <div className="seo-section">
                   <RankTrackerView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
                 </div>
               )}
 
-              {activeSection === "vitals" && (
-                <div className="seo-section">
-                  <VitalsView brandId={brand.id} doc={vitalsDoc} available={vitalsAvailable}
-                              onLoaded={setVitalsDoc} onToast={onToast} />
-                </div>
-              )}
-
-              {activeSection === "deep-audit" && (
-                <div className="seo-section">
-                  <DeepAuditPanel brandId={brand.id} onToast={onToast} />
-                </div>
-              )}
-
-              {activeSection === "pages" && (
+              {workspace === "daily" && dailySection === "pages" && (
                 <div className="seo-section">
                   <PagesView doc={pagesDoc} busy={pagesBusy} error={pagesError}
                     onRefresh={() => void refreshPages(brand.id)} />
                 </div>
               )}
 
-              {activeSection === "tools" && (
+              {workspace === "daily" && dailySection === "tools" && (
                 <div className="seo-section">
                   <div className="seo-cluster__kws">
                     {(Object.keys(TOOL_LABELS) as SeoTool[]).map((t) => (
@@ -1071,16 +1077,15 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                   </div>
                   {tool === "ask" && <AskView brandId={brand.id} brandName={brand.name} />}
                   {tool === "briefs" && <BriefsView brandId={brand.id} onToast={onToast} />}
-                  {tool === "audit" && <AuditView brandId={brand.id} brandName={brand.name} onToast={onToast} />}
                 </div>
               )}
 
-              {/* Defense in depth alongside the SectionId union and
-                  navigateToSection's runtime clamp above: if activeSection
-                  somehow matches none of the nine ids, fall back to Insights
-                  instead of rendering a blank pane with no sidebar item
-                  marked active. */}
-              {!SECTIONS.some((s) => s.id === activeSection) && (
+              {/* Defense in depth alongside the section unions and
+                  resolveSection's runtime clamp: if the Daily selection
+                  somehow matches none of its ids, fall back to Insights
+                  instead of rendering a blank pane. (The Deep branch cannot
+                  blank: DeepWorkspace renders its header for any id.) */}
+              {workspace === "daily" && !DAILY_SECTIONS.some((s) => s.id === dailySection) && (
                 <div className="seo-section">
                   <InsightsView brandId={brand.id} onToast={onToast} onNavigate={navigateToSection} />
                 </div>

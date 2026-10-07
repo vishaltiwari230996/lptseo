@@ -713,7 +713,7 @@ def test_focus_keywords_are_reused_until_the_post_changes(monkeypatch):
     # only when the title/H1/URL it answered from actually changes.
     calls = []
 
-    def fake_llm(system, prompt):
+    def fake_llm(system, prompt, **kw):
         calls.append(prompt)
         return {"items": [{"i": 0, "keyword": "clat colleges"}]}
 
@@ -873,7 +873,7 @@ def test_a_run_that_sees_no_posts_does_not_erase_remembered_keywords(monkeypatch
     # one broken crawl (0 posts) wiped all 789 and the model re-chose them.
     calls = []
     monkeypatch.setattr(sources, "llm_json",
-                        lambda s, p: calls.append(p) or {"items": [{"i": 0, "keyword": "clat colleges"}]})
+                        lambda s, p, **kw: calls.append(p) or {"items": [{"i": 0, "keyword": "clat colleges"}]})
     post = _rec("https://s.com/blog/clat/colleges/", type="blog_post", title="Top CLAT Colleges")
     kd.focus_keywords([post], "Brand", {}, brand_id="b")
     kd.focus_keywords([], "Brand", {}, brand_id="b")

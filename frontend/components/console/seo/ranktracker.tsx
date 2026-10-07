@@ -22,8 +22,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isAbortError, RequestSequence,
   seoAddCustomQuery, seoBuildBrief, seoRankGap, seoRankHistory, seoRankPoolRebuild,
-  seoRankSweep, seoRankTracker, seoRemoveCustomQuery,
+  seoRankAnalysis, seoRankAnalysisRefresh, seoRankSweep, seoRankTracker, seoRemoveCustomQuery,
   type DeepJob, type RankDaily, type RankGap, type RankHistory, type RankPoint,
+  type SeoRankAnalysis,
   type RankRow, type RankSweepOutcome, type RankTrackerDoc,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
@@ -275,6 +276,55 @@ function GapCard({ gap }: { gap: RankGap }) {
 }
 
 /* ================================ container ================================ */
+
+/* Structured analysis over the rank digest — never the raw rows. Grounded
+ * bullets, cached by sweep fingerprint on the backend; "rule-based" when the
+ * model is unavailable, so the card is honest about its own source. */
+function AnalysisCard({ brandId, onToast }: { brandId: string; onToast: ToastFn }) {
+  const [doc, setDoc] = useState<SeoRankAnalysis | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let live = true;
+    seoRankAnalysis(brandId)
+      .then((r) => { if (live) setDoc(r.analysis); })
+      .catch(() => { /* a missing analysis is a normal first-run state */ });
+    return () => { live = false; };
+  }, [brandId]);
+
+  async function refresh() {
+    setBusy(true);
+    try {
+      const { analysis } = await seoRankAnalysisRefresh(brandId);
+      setDoc(analysis);
+    } catch (exc) {
+      onToast(describeFailure(exc, "Could not analyse the rank data"), "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="seo-rank__analysis">
+      <div className="seo-lab__head">
+        <h3 className="mr-section__title">
+          Analysis{doc ? ` · ${doc.at.slice(0, 16).replace("T", " ")}` : ""}
+          {doc && !doc.llm && <span className="seo-chip" title="Model unavailable — deterministic rules">rule-based</span>}
+        </h3>
+        <button className="seo-btn" disabled={busy} onClick={() => void refresh()}>
+          {busy ? "Analysing…" : doc ? "Re-analyse" : "Analyse"}
+        </button>
+      </div>
+      {!doc ? (
+        <p className="seo-note">No analysis yet — hit Analyse after a sweep.</p>
+      ) : (
+        <ul className="seo-insights">
+          {doc.bullets.map((b, i) => <li key={i}>{b}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function RankTrackerView({ brandId, isCreator, onToast }: {
   brandId: string; isCreator: boolean; onToast: ToastFn;
@@ -590,6 +640,8 @@ export function RankTrackerView({ brandId, isCreator, onToast }: {
           <JobFailure job={doc.job} />
           <SweepOutcome last={doc.last_sweep} enabled={doc.enabled} />
           <NoteList notes={doc.pool.notes} />
+
+          <AnalysisCard brandId={brandId} onToast={onToast} />
 
           <div className="seo-rank__worklist">
             <h3 className="mr-section__title">Fix these next</h3>

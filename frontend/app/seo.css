@@ -613,6 +613,98 @@ a.seo-pages__path:hover { color: var(--green-500); }
   min-width: 0;
 }
 
+/* The Daily / Deep-analysis workspace toggle above the shell. Same token
+   vocabulary as the sidebar it steers: brand fill on the active tab,
+   --on-brand text, the card surface behind the group. Segmented-control
+   shape (one bordered pill containing both tabs) so it reads as "two views
+   of one thing", not as two more buttons in the brand-action row above. */
+.seo-wswitch {
+  display: inline-flex;
+  gap: var(--space-1);
+  padding: var(--space-1);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  width: fit-content;
+}
+
+.seo-wswitch__tab {
+  padding: var(--pad-control);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font: var(--text-body);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+.seo-wswitch__tab:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.seo-wswitch__tab[aria-selected="true"] {
+  background: var(--brand);
+  color: var(--on-brand);
+}
+
+/* The daily brief — five blocks, read top to bottom. Tone lives in a thin
+   left border, not a filled background: these are reading surfaces, and a
+   page of solid red/green cards shouts over its own content. */
+.seo-brief {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.seo-brief__block {
+  padding: var(--pad-card);
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-lg);
+}
+
+.seo-brief__block--bad { border-left-color: var(--danger); }
+.seo-brief__block--good { border-left-color: var(--success, #178745); }
+.seo-brief__block--fix { border-left-color: var(--brand); }
+.seo-brief__block--later,
+.seo-brief__block--rank { border-left-color: var(--border); }
+
+.seo-brief__title {
+  margin: 0 0 var(--space-2);
+  font: var(--fw-semibold) var(--fs-caption)/var(--lh-caption) var(--font-sans);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.seo-brief__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.seo-brief__list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.seo-brief__rank { display: grid; gap: var(--space-2); justify-items: start; }
+
+.seo-brief__rankstats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.seo-brief__bad { color: var(--danger); font-weight: var(--fw-semibold); }
+.seo-brief__good { color: var(--success, #178745); font-weight: var(--fw-semibold); }
+
 /* Wraps each sidebar section's content (replaces the deleted accordion's
    `.seo-fold__body { padding: 6px 18px 18px; display: grid; gap: 14px; }`).
    Sections with more than one child (Traffic, Keywords, Tools) need the same

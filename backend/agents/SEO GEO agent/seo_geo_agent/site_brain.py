@@ -17,7 +17,7 @@ from datetime import date
 
 import httpx
 
-from . import sources, state
+from . import knowledge, sources, state
 from .sources import CredentialMissing, FETCH_UA, fetch_page, fetch_sitemap
 
 MAX_PAGES = 50
@@ -55,7 +55,7 @@ def _summarize_batch(batch: list) -> list[dict]:
         f"PAGE {i}: {f.url}\nTITLE: {f.title}\nHEADINGS: {'; '.join((f.h1 + f.h2)[:6])}\nTEXT: {f.text[:1500]}"
         for i, f in enumerate(batch)
     )
-    raw = sources.llm_json(SUMMARY_SYSTEM, pages_text)
+    raw = sources.llm_json(SUMMARY_SYSTEM, pages_text, bulk=True)  # ~50 pages/run: bulk tier
     if not isinstance(raw, list) or len(raw) != len(batch):
         raise CredentialMissing("summary batch returned wrong shape")
     return [
@@ -199,7 +199,10 @@ def expert_review(brand: dict, corpus: dict) -> dict:
     notes = list(corpus.get("degraded", []))
     try:
         raw = sources.llm_json(
-            EXPERT_SYSTEM,
+            # The playbooks sharpen judgement (audit priorities, AI-citation
+            # rules); the STRICT RULES above still bind every claim to the
+            # SITE PAGES evidence — knowledge never adds brand facts.
+            f"{EXPERT_SYSTEM}\n\nEXPERT PLAYBOOK:\n{knowledge.for_site_review()}",
             f"CLIENT: {brand['name']} ({brand['domain']})\nSITE PAGES:\n{_digest(corpus)}",
             fast=False,
         )

@@ -22,6 +22,7 @@ OVERRIDE_FIELDS: tuple[str, ...] = (
     "openrouter_api_key",
     "openrouter_model",
     "openrouter_fast_model",
+    "openrouter_bulk_model",
     "openrouter_image_model",
     "openrouter_vision_model",
     "gd_planner_model",
@@ -44,6 +45,7 @@ OVERRIDE_FIELDS: tuple[str, ...] = (
 AGENT_OVERRIDE_FIELDS: tuple[str, ...] = (
     "openrouter_model",
     "openrouter_fast_model",
+    "openrouter_bulk_model",
     "openrouter_image_model",
     "openrouter_vision_model",
     "gd_planner_model",

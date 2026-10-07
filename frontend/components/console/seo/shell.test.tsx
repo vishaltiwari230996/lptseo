@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
-import { Shell } from "./shell";
+import { Shell, WorkspaceSwitch } from "./shell";
 
 // This project doesn't run Vitest with `globals: true`, so
 // @testing-library/react's automatic afterEach cleanup (which relies on
@@ -37,6 +37,50 @@ describe("Shell", () => {
   });
 
   it("offers a Rank tracker section", () => {
+    render(
+      <Shell
+        sections={[{ id: "insights", label: "Insights" },
+                   { id: "rank-tracker", label: "Rank tracker" }]}
+        activeId="rank-tracker"
+        onSelect={vi.fn()}
+      >
+        <div>panel</div>
+      </Shell>,
+    );
+    expect(screen.getByRole("button", { name: /rank tracker/i }))
+      .toHaveAttribute("aria-current", "page");
+  });
+});
+
+const WORKSPACES = [
+  { id: "daily", label: "Daily" },
+  { id: "deep", label: "Deep analysis" },
+];
+
+describe("WorkspaceSwitch", () => {
+  it("renders both workspaces and marks the active one", () => {
+    render(<WorkspaceSwitch workspaces={WORKSPACES} activeId="deep" onSelect={vi.fn()} />);
+    expect(screen.getByRole("tab", { name: "Daily" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "Deep analysis" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("calls onSelect with the other workspace's id when clicked", () => {
+    const onSelect = vi.fn();
+    render(<WorkspaceSwitch workspaces={WORKSPACES} activeId="daily" onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Deep analysis" }));
+    expect(onSelect).toHaveBeenCalledWith("deep");
+  });
+
+  it("does not re-fire onSelect for the already-active workspace", () => {
+    const onSelect = vi.fn();
+    render(<WorkspaceSwitch workspaces={WORKSPACES} activeId="daily" onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Daily" }));
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe("Shell (legacy rank tracker case)", () => {
+  it("keeps the rank tracker reachable", () => {
     render(
       <Shell
         sections={[{ id: "insights", label: "Insights" },

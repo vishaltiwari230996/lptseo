@@ -497,17 +497,20 @@ def _clean_llm_error(exc: Exception) -> str:
     return str(exc)
 
 
-def llm_text(system: str, prompt: str, *, agent_id: str | None = None, fast: bool = True) -> str:
+def llm_text(system: str, prompt: str, *, agent_id: str | None = None,
+             fast: bool = True, bulk: bool = False) -> str:
     """One LLM completion returned as plain text. Raises ``CredentialMissing``
     when offline or the provider fails, so callers surface an honest message.
     ``agent_id`` routes the creator's per-agent model override (agent → global).
-    ``fast=False`` routes substantive analysis through the heavier reasoning model."""
+    ``fast=False`` routes substantive analysis through the heavier reasoning model;
+    ``bulk=True`` the cheapest high-volume extraction tier (summaries, per-page
+    one-liners, focus-keyword naming) — it outranks ``fast``."""
     if not state.use_network():
         raise CredentialMissing("offline mode")
     try:
         from app.services.openrouter import get_llm
 
-        raw = get_llm(temperature=0.3, fast=fast, agent_id=agent_id).invoke(
+        raw = get_llm(temperature=0.3, fast=fast, bulk=bulk, agent_id=agent_id).invoke(
             [("system", system), ("user", prompt)]
         ).content
         return str(raw).strip()
@@ -515,7 +518,8 @@ def llm_text(system: str, prompt: str, *, agent_id: str | None = None, fast: boo
         raise CredentialMissing(f"LLM unavailable: {_clean_llm_error(exc)}") from exc
 
 
-def llm_json(system: str, prompt: str, *, agent_id: str | None = None, fast: bool = True):
+def llm_json(system: str, prompt: str, *, agent_id: str | None = None,
+             fast: bool = True, bulk: bool = False):
     """One LLM completion, parsed as JSON. Raises ``CredentialMissing``
     on any failure so callers fall back to their deterministic heuristic.
     ``agent_id`` routes the creator's per-agent model override (agent → global).
@@ -525,7 +529,7 @@ def llm_json(system: str, prompt: str, *, agent_id: str | None = None, fast: boo
     try:
         from app.services.openrouter import get_llm
 
-        raw = get_llm(temperature=0.2, fast=fast, agent_id=agent_id).invoke(
+        raw = get_llm(temperature=0.2, fast=fast, bulk=bulk, agent_id=agent_id).invoke(
             [("system", system), ("user", prompt)]
         ).content
         text = str(raw).strip()

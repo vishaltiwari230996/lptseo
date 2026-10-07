@@ -398,7 +398,7 @@ def test_corpus_falls_back_without_llm():
 def test_corpus_cache_skips_unchanged_pages(monkeypatch):
     calls = {"n": 0}
 
-    def fake_llm(system, prompt):
+    def fake_llm(system, prompt, **kw):
         calls["n"] += 1
         return [{"summary": "s", "type": "service", "topics": ["t"]}] * prompt.count("PAGE ")
 
@@ -509,8 +509,15 @@ def test_run_brand_uses_connected_property(monkeypatch):
 # --------------------------------- advisor ---------------------------------
 
 def test_advisor_context_survives_empty_state():
+    """Empty state → brand header only, as valid JSON. Sections with no data
+    are ABSENT (the system prompt turns absence into "run X first"), never
+    null-stuffed placeholders the model could mistake for measurements."""
+    import json as _json
+
     ctx = advisor._context(BRAND)
-    assert "x.com" in ctx and "tech_audit" in ctx
+    parsed = _json.loads(ctx)
+    assert parsed["brand"]["domain"] == "x.com"
+    assert "tech_audit" not in parsed
 
 
 def test_advisor_ask_offline_raises():

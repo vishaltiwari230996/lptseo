@@ -328,7 +328,7 @@ def focus_keywords(posts: list[dict], brand_name: str, gsc_top: dict[str, str],
             lines.append(f'{i}. path="/{path}" title="{r.get("title", "")}" h1="{h1}"')
         got: dict[int, str] = {}
         try:
-            reply = llm_json(_SYSTEM, "\n".join(lines))
+            reply = llm_json(_SYSTEM, "\n".join(lines), bulk=True)  # 30 posts/batch: bulk tier
             for item in (reply or {}).get("items", []):
                 if isinstance(item, dict) and isinstance(item.get("i"), int) and item.get("keyword"):
                     got[item["i"]] = _clean_keyword(str(item["keyword"]))

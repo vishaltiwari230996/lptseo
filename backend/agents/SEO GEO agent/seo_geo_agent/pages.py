@@ -90,7 +90,7 @@ def _ai_recs(pages: list[dict]) -> dict[str, str]:
         f"clicks: {p['clicks']} | flags: {', '.join(p['flags']) or 'none'}"
         for p in pages
     )
-    raw = llm_text(SYSTEM, f"Pages:\n{lines}", fast=False)
+    raw = llm_text(SYSTEM, f"Pages:\n{lines}", bulk=True)  # 25 one-liners: bulk tier
     text = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
     data = json.loads(text)
     if not isinstance(data, list):

@@ -26,19 +26,21 @@ def get_llm(
     temperature: float = 0.4,
     *,
     fast: bool = False,
+    bulk: bool = False,
     model: str | None = None,
     agent_id: str | None = None,
 ) -> ChatOpenAI:
     """LangChain chat model backed by OpenRouter.
 
     ``model`` pins an explicit model id (e.g. the GD planner); otherwise
-    ``fast=True`` selects the cheap parsing model and the default is the
-    high-end reasoning model. ``agent_id`` resolves the creator's per-agent
+    ``fast=True`` selects the cheap parsing model, ``bulk=True`` the cheapest
+    high-volume extraction tier (it outranks ``fast``), and the default is
+    the high-end reasoning model. ``agent_id`` resolves the creator's per-agent
     model override first (agent → global → env); without it the global
     default applies."""
-    resolved = model or runtime_config.get_for_agent(
-        agent_id, "openrouter_fast_model" if fast else "openrouter_model"
-    )
+    field = ("openrouter_bulk_model" if bulk
+             else "openrouter_fast_model" if fast else "openrouter_model")
+    resolved = model or runtime_config.get_for_agent(agent_id, field)
     return ChatOpenAI(
         model=resolved,
         api_key=runtime_config.require("openrouter_api_key"),

@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 from datetime import date
 
-from . import competitors, keywords as kw_lab, sources, state
+from . import competitors, keywords as kw_lab, knowledge, sources, state
 from .sources import CredentialMissing, QueryStat, fetch_page
 from .topics import _tokens
 
@@ -57,7 +57,9 @@ def build_brief(brand: dict, keyword: str, rows: list[QueryStat], search=None, f
     notes: list[str] = []
     try:
         raw = sources.llm_json(
-            'You are a content strategist. Answer with JSON only: {"outline": [{"heading": str, "note": str}]}.',
+            'You are a content strategist. Answer with JSON only: {"outline": [{"heading": str, "note": str}]}.\n'
+            'Apply this playbook to every heading and note — answer-first sections, extractable blocks, '
+            'questions phrased the way searchers ask them:\n' + knowledge.for_briefs(),
             f"Write a content-brief outline for an article targeting '{keyword}' for {brand['name']} "
             f"({brand['domain']}). Ground it in this SERP evidence — themes the top pages share: "
             f"{deep['common_themes']}; questions searchers ask: {deep['questions']}; entities that keep "

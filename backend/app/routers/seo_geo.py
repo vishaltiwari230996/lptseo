@@ -29,6 +29,8 @@ from seo_geo_agent import competitors as seo_competitors
 from seo_geo_agent import insights, keyword_pool as seo_kwpool, keywords as seo_keywords, sources
 from seo_geo_agent import pages as seo_pages
 from seo_geo_agent import priorities as seo_priorities
+from seo_geo_agent import brief as seo_brief
+from seo_geo_agent import rank_analysis as seo_rank_analysis
 from seo_geo_agent import rank_gap as seo_rank_gap
 from seo_geo_agent import rank_tracker as seo_rank
 from seo_geo_agent import sitemap_health as seo_sitemap
@@ -398,6 +400,7 @@ def add_custom_query(brand_id: str, payload: CustomQueryIn, user=Depends(require
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     act.note(f"Added query “{payload.query.strip()}” ({len(queries)} custom queries total)")
+    seo_rank.build_pool(brand, rows_fn=_rows_28d)  # swept on the next pass, not tomorrow
     return {"custom_queries": queries, "pool_size": len(seo_competitors.rank_tracking_pool(brand))}
 
 
@@ -408,6 +411,7 @@ def remove_custom_query(brand_id: str, payload: CustomQueryIn, user=Depends(requ
     _for(act, brand)
     queries = seo_competitors.remove_custom_query(brand_id, payload.query)
     act.note(f"Removed query “{payload.query.strip()}” ({len(queries)} custom queries remain)")
+    seo_rank.build_pool(brand, rows_fn=_rows_28d)  # deactivates the row, keeps its history
     return {"custom_queries": queries, "pool_size": len(seo_competitors.rank_tracking_pool(brand))}
 
 
@@ -881,6 +885,44 @@ def _rank_payload(brand: dict) -> dict:
     }
 
 
+@router.get("/seo-geo/brief/{brand_id}")
+def get_brief(brand_id: str, user=Depends(get_current_user)):
+    """The employee's daily brief. Built fresh on every read: it is pure local
+    reads over already-persisted digests, so there is nothing to cache and no
+    staleness to explain."""
+    return {"brief": seo_brief.build(_brand_or_404(brand_id))}
+
+
+@router.get("/seo-geo/rank-board/{brand_id}")
+def get_rank_board(brand_id: str, user=Depends(get_current_user)):
+    """The expert-curated rank board: ONLY the custom queries the team added,
+    each with our position and everyone ranking above us. GSC/harvested
+    queries stay in the wider rank tracker."""
+    brand = _brand_or_404(brand_id)
+    custom = seo_competitors.list_custom_queries(brand_id)
+    wanted = {seo_rank._norm(q) for q in custom}
+    rows = []
+    seen = set()
+    for r in seo_rank.annotate_rows(brand):
+        key = seo_rank._norm(r["query"])
+        if key not in wanted:
+            continue
+        seen.add(key)
+        position = r.get("position")
+        above = [e for e in (r.get("top") or [])
+                 if position is None or (e.get("position") or 99) < position]
+        rows.append({
+            "query": r["query"], "position": position, "url": r.get("url", ""),
+            "delta_7d": r.get("delta_7d"), "dropped": r.get("dropped", False),
+            "impressions": r.get("impressions", 0), "checked_at": r.get("checked_at", ""),
+            "above": above[:10],
+        })
+    rows.sort(key=lambda r: (r["position"] is None, r["position"] or 99))
+    pending = [q for q in custom if seo_rank._norm(q) not in seen]
+    return {"rows": rows, "pending": pending, "custom_queries": custom,
+            "last_sweep": seo_rank.last_sweep(brand_id)}
+
+
 @router.get("/seo-geo/rank-tracker/{brand_id}")
 def get_rank_tracker(brand_id: str, user=Depends(get_current_user)):
     return _rank_payload(_brand_or_404(brand_id))
@@ -917,6 +959,23 @@ def rebuild_rank_pool(brand_id: str, user=Depends(require_creator),
     active = len([q for q in pool["queries"] if q.get("active")])
     act.note(f"Pool rebuilt: {active} active queries from {', '.join(pool['sources_used']) or 'no source'}")
     return _rank_payload(brand)
+
+
+@router.get("/seo-geo/rank-tracker/{brand_id}/analysis")
+def get_rank_analysis(brand_id: str, user=Depends(get_current_user)):
+    _brand_or_404(brand_id)
+    return {"analysis": seo_rank_analysis.latest(brand_id)}
+
+
+@router.post("/seo-geo/rank-tracker/{brand_id}/analysis/refresh")
+def refresh_rank_analysis(brand_id: str, user=Depends(get_current_user),
+                          act: Activity = trail.records("rank_analysis", "Analysed rank tracking")):
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    doc = seo_rank_analysis.analyse(brand)
+    act.note(f"Rank analysis: {len(doc['bullets'])} findings"
+             + (" (model)" if doc.get("llm") else " (rule-based)"))
+    return {"analysis": doc}
 
 
 @router.post("/seo-geo/rank-tracker/{brand_id}/gap")

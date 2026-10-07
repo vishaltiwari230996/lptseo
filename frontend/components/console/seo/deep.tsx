@@ -28,15 +28,14 @@ import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
 import { Icon } from "@/lib/kit-ui";
 
-type Tab = "landing" | "sitemap" | "cannibal" | "density" | "speed";
+/* The five crawl-fed panels. They used to be tabs nested inside one "Deep
+ * audit" section; the Deep-analysis workspace now lists each on the left
+ * rail, so this type names which panel `DeepWorkspace` is being asked for.
+ * Anything else ("vitals", "health") is rendered by the caller and passed in
+ * as children — those read other data sources, not this crawl. */
+type CrawlSection = "overview" | "landing" | "sitemap" | "cannibal" | "density" | "speed";
 
-const TABS: { id: Tab; label: string }[] = [
-  { id: "landing", label: "Landing pages" },
-  { id: "sitemap", label: "Sitemap" },
-  { id: "cannibal", label: "Cannibalization" },
-  { id: "density", label: "Blog keyword density" },
-  { id: "speed", label: "Page speed" },
-];
+const CRAWL_SECTIONS = new Set<string>(["overview", "landing", "sitemap", "cannibal", "density", "speed"]);
 
 const PAGE = 40;
 const fmt = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("en-IN"));
@@ -122,8 +121,11 @@ function JobBar({ job, label }: { job: DeepJob | null; label: string }) {
 
 /* ================================ container =============================== */
 
-export function DeepAuditPanel({ brandId, onToast }: { brandId: string; onToast: ToastFn }) {
-  const [tab, setTab] = useState<Tab>("landing");
+/** Everything the Deep-analysis workspace needs to know about the crawl:
+ *  the latest summary, both background jobs (polled while either runs), and
+ *  the start action. One hook rather than per-panel fetches, so switching
+ *  between the five crawl panels never re-polls or loses a running job bar. */
+function useDeepAudit(brandId: string, onToast: ToastFn) {
   const [summary, setSummary] = useState<DeepSummary | null>(null);
   const [job, setJob] = useState<DeepJob | null>(null);
   const [speedJob, setSpeedJob] = useState<DeepJob | null>(null);
@@ -179,8 +181,19 @@ export function DeepAuditPanel({ brandId, onToast }: { brandId: string; onToast:
 
   const deepRunning = !!(job && job.status === "running" && job.alive);
 
+  return {
+    summary, job, speedJob, version, starting, deepRunning, start,
+    onSpeedStarted: (j: DeepJob) => { setSpeedJob(j); wasRunning.current.speed = true; },
+  };
+}
+
+/** The crawl's status block, shown above every Deep-analysis section so a
+ *  running (or failed) audit is never out of sight: the run button, both job
+ *  bars, and the five-number summary strip. */
+function DeepHeader({ d }: { d: ReturnType<typeof useDeepAudit> }) {
+  const { summary } = d;
   return (
-    <div className="deep">
+    <>
       <div className="deep-head">
         <div>
           <h3 className="mr-section__title">
@@ -191,13 +204,14 @@ export function DeepAuditPanel({ brandId, onToast }: { brandId: string; onToast:
             blog keyword density are all read from that one snapshot.
           </p>
         </div>
-        <button className="seo-btn seo-btn--primary" disabled={deepRunning || starting} onClick={() => void start()}>
+        <button className="seo-btn seo-btn--primary" disabled={d.deepRunning || d.starting}
+                onClick={() => void d.start()}>
           <Icon name="refresh-cw" size={13} /> {summary ? "Re-run deep audit" : "Run deep audit"}
         </button>
       </div>
 
-      <JobBar job={job} label="Deep audit" />
-      <JobBar job={speedJob} label="Page speed" />
+      <JobBar job={d.job} label="Deep audit" />
+      <JobBar job={d.speedJob} label="Page speed" />
 
       {summary && (
         <div className="deep-overview">
@@ -214,31 +228,84 @@ export function DeepAuditPanel({ brandId, onToast }: { brandId: string; onToast:
                 tone={summary.density.posts && summary.density.pass / summary.density.posts > 0.8 ? "good" : "bad"} />
         </div>
       )}
+    </>
+  );
+}
 
-      <div className="deep-tabs" role="tablist" aria-label="Deep audit sections">
-        {TABS.map((t) => (
-          <button key={t.id} role="tab" aria-selected={tab === t.id}
-                  className={`deep-tab${tab === t.id ? " deep-tab--on" : ""}`}
-                  onClick={() => setTab(t.id)}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+const NO_AUDIT_YET = (
+  <Empty>
+    No deep audit yet. It discovers every sitemap (following nested indexes to any depth),
+    crawls every URL once, and runs all four diagnostics from that crawl. On a 1,000-page
+    site it takes about five minutes.
+  </Empty>
+);
 
-      <div role="tabpanel">
-        {!summary && tab !== "speed" ? (
-          <Empty>
-            No deep audit yet. It discovers every sitemap (following nested indexes to any depth),
-            crawls every URL once, and runs all four diagnostics from that crawl. On a 1,000-page
-            site it takes about five minutes.
-          </Empty>
-        ) : tab === "landing" ? <LandingTab brandId={brandId} version={version} />
-          : tab === "sitemap" ? <SitemapTab brandId={brandId} version={version} />
-          : tab === "cannibal" ? <CannibalTab brandId={brandId} version={version} />
-          : tab === "density" ? <DensityTab brandId={brandId} version={version} />
-          : <SpeedTab brandId={brandId} version={version} job={speedJob} hasCrawl={!!summary}
-                      onToast={onToast} onStarted={(j) => { setSpeedJob(j); wasRunning.current.speed = true; }} />}
+/** The Overview section's body — what the crawl covered, beyond the summary
+ *  strip the header already shows. */
+function OverviewPanel({ summary }: { summary: DeepSummary }) {
+  const types = Object.entries(summary.pages_by_type).sort((a, b) => b[1] - a[1]);
+  return (
+    <div className="deep-tabbody">
+      <div className="deep-strip">
+        <Stat label="Sitemap files" value={fmt(summary.sitemaps)} />
+        <Stat label="URLs crawled" value={fmt(summary.urls)} />
+        <Stat label="Returned 200" value={fmt(summary.live_pages)}
+              tone={summary.live_pages === summary.urls ? "good" : "warn"} />
+        <Stat label="Search Console" value={summary.gsc_connected ? "connected" : "not connected"}
+              tone={summary.gsc_connected ? "good" : undefined} />
       </div>
+      <section>
+        <h4 className="deep-h4">Pages by type</h4>
+        <div className="deep-table-wrap">
+          <table className="deep-table">
+            <thead><tr><th>Type</th><th className="num">Pages</th></tr></thead>
+            <tbody>
+              {types.map(([type, count]) => (
+                <tr key={type}><td>{type}</td><td className="num">{fmt(count)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {summary.notes.length > 0 && (
+        <section>
+          <h4 className="deep-h4">Notes from the run</h4>
+          <ul className="deep-evlist">
+            {summary.notes.map((n) => <li key={n}>{n}</li>)}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/** One Deep-analysis section on screen. The five crawl panels render here,
+ *  under the shared header; anything the caller passes as children (Core Web
+ *  Vitals, the expert review — different data sources) renders under that
+ *  same header instead, so the crawl's status stays visible everywhere in
+ *  the workspace. */
+export function DeepWorkspace({ brandId, section, onToast, children }: {
+  brandId: string;
+  section: string;
+  onToast: ToastFn;
+  children?: React.ReactNode;
+}) {
+  const d = useDeepAudit(brandId, onToast);
+  const { summary, version } = d;
+  const crawlSection = CRAWL_SECTIONS.has(section) ? (section as CrawlSection) : null;
+  return (
+    <div className="deep">
+      <DeepHeader d={d} />
+      {crawlSection === null ? children
+        : crawlSection === "speed" ? (
+          <SpeedTab brandId={brandId} version={version} job={d.speedJob} hasCrawl={!!summary}
+                    onToast={onToast} onStarted={d.onSpeedStarted} />
+        ) : !summary ? NO_AUDIT_YET
+          : crawlSection === "overview" ? <OverviewPanel summary={summary} />
+          : crawlSection === "landing" ? <LandingTab brandId={brandId} version={version} />
+          : crawlSection === "sitemap" ? <SitemapTab brandId={brandId} version={version} />
+          : crawlSection === "cannibal" ? <CannibalTab brandId={brandId} version={version} />
+          : <DensityTab brandId={brandId} version={version} />}
     </div>
   );
 }

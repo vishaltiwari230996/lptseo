@@ -2599,6 +2599,72 @@ export const seoPriorities = (id: string, opts?: RequestOptions) =>
 export const seoPrioritiesRefresh = (id: string) =>
   postJson<{ priorities: SeoPrioritiesDoc }>(`/api/seo-geo/priorities/${id}/refresh`, {});
 
+/* The daily brief — five deterministic blocks, built fresh on every read. */
+
+export interface SeoBriefLine {
+  text: string;
+  /** Console section id the evidence lives in (resolveSection routes it). */
+  link: string;
+}
+
+export interface SeoBriefDoc {
+  brand_id: string;
+  at: string;
+  current_rank: {
+    at: string | null; tracked: number; top3: number; page1: number;
+    striking: number; unranked: number; moved_up: number; moved_down: number;
+    dropouts: number; best: { query: string; position: number }[];
+  } | null;
+  working: SeoBriefLine[];
+  not_working: SeoBriefLine[];
+  immediate: SeoBriefLine[];
+  secondary: SeoBriefLine[];
+  notes: string[];
+}
+
+export const seoBrief = (id: string, opts?: RequestOptions) =>
+  getJson<{ brief: SeoBriefDoc }>(`/api/seo-geo/brief/${id}`, opts);
+
+/* The expert-curated rank board: custom queries only, with who ranks above. */
+
+export interface SeoRankBoardEntry {
+  query: string;
+  position: number | null;
+  url: string;
+  delta_7d: number | null;
+  dropped: boolean;
+  impressions: number;
+  checked_at: string;
+  above: { position: number; domain: string; url: string; title: string }[];
+}
+
+export interface SeoRankBoardDoc {
+  rows: SeoRankBoardEntry[];
+  /** Expert queries added but not yet swept. */
+  pending: string[];
+  custom_queries: string[];
+  last_sweep: { at: string; checked: number; ranked: number; errors: number;
+                blocked: string | null; notes: string[] } | null;
+}
+
+export const seoRankBoard = (id: string, opts?: RequestOptions) =>
+  getJson<SeoRankBoardDoc>(`/api/seo-geo/rank-board/${id}`, opts);
+
+/* Rank analysis — grounded bullets over the rank digest, cached by sweep. */
+
+export interface SeoRankAnalysis {
+  at: string;
+  bullets: string[];
+  llm: boolean;
+  cached?: boolean;
+}
+
+export const seoRankAnalysis = (id: string, opts?: RequestOptions) =>
+  getJson<{ analysis: SeoRankAnalysis | null }>(`/api/seo-geo/rank-tracker/${id}/analysis`, opts);
+
+export const seoRankAnalysisRefresh = (id: string) =>
+  postJson<{ analysis: SeoRankAnalysis }>(`/api/seo-geo/rank-tracker/${id}/analysis/refresh`, {});
+
 export type SeoKeywordBand = "top3" | "page1" | "page2" | "beyond" | "unranked";
 
 export interface SeoPoolKeyword {

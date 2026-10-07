@@ -235,3 +235,36 @@ def test_setting_competitors_caps_at_the_tracked_rival_limit(client, monkeypatch
                       json={"domains": [f"c{n}.com" for n in range(12)]})
 
     assert len(resp.json()["tracked"]) == rank_tracker.MAX_RIVALS
+
+
+# ------------------------------- rank board --------------------------------
+
+def test_rank_board_shows_only_expert_queries_with_who_is_above(client, monkeypatch):
+    from seo_geo_agent import competitors, rank_tracker
+
+    monkeypatch.setattr(competitors, "list_custom_queries",
+                        lambda bid: ["CLAT Coaching", "unswept query"])
+    monkeypatch.setattr(rank_tracker, "annotate_rows", lambda brand: [
+        {"query": "clat coaching", "position": 4, "url": "https://lawpreptutorial.com/clat",
+         "top": [{"position": 1, "domain": "rival.com", "url": "u1", "title": "t"},
+                 {"position": 5, "domain": "below.com", "url": "u2", "title": "t"}],
+         "checked_at": "2026-10-07T06:00:00", "error": None, "impressions": 900,
+         "delta_7d": -2, "dropped": False,
+         "leader": "rival.com", "leader_position": 1, "leader_url": "u1"},
+        {"query": "harvested query", "position": 8, "url": "x", "top": [], "checked_at": "t",
+         "error": None, "impressions": 10, "delta_7d": None, "dropped": False,
+         "leader": None, "leader_position": None, "leader_url": None},
+    ])
+    body = client.get("/api/seo-geo/rank-board/b1").json()
+    queries = [r["query"] for r in body["rows"]]
+    assert queries == ["clat coaching"]            # expert-curated only, case-insensitive
+    assert body["pending"] == ["unswept query"]    # added but not yet swept
+    above = body["rows"][0]["above"]
+    assert [e["domain"] for e in above] == ["rival.com"]  # #5 below us stays out
+
+
+def test_brief_route_returns_the_five_blocks(client, monkeypatch):
+    from seo_geo_agent import digests
+    monkeypatch.setattr(digests.rank_tracker, "annotate_rows", lambda brand: [])
+    body = client.get("/api/seo-geo/brief/b1").json()["brief"]
+    assert set(body) >= {"current_rank", "working", "not_working", "immediate", "secondary", "notes"}
