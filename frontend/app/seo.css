@@ -558,37 +558,47 @@ a.seo-pages__path:hover { color: var(--green-500); }
    existing --radius-xl/--radius-lg scale instead of new hardcoded px values —
    the same scale Task 9 standardized the dashboard's tile/vital/band/pool
    cards on (in frontend/app/dashboard.css). */
+/* The section nav is a horizontal header bar above the content (it was a
+   left rail; the owner wanted the full width for tables). Sticky under the
+   topbar so the sections stay reachable mid-scroll; overflow scrolls
+   sideways rather than wrapping, so the bar is one predictable line. */
 .seo-shell {
   display: grid;
-  grid-template-columns: var(--sidebar-w) 1fr;
-  gap: var(--space-6);
+  grid-template-columns: 1fr;
+  gap: var(--space-4);
   align-items: start;
   min-height: 0;
 }
 
 .seo-sidebar {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: var(--space-1);
   position: sticky;
   top: var(--topbar-h);
-  padding: var(--pad-card);
+  z-index: 5;
+  padding: var(--space-2);
   background: var(--surface-card);
   border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
+  border-radius: var(--radius-pill);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.seo-sidebar::-webkit-scrollbar { display: none; }
 
 .seo-sidebar__item {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: center;
   gap: 2px;
   padding: var(--pad-control);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-pill);
   border: none;
   background: transparent;
   color: var(--text-secondary);
-  text-align: left;
+  text-align: center;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
   font: var(--text-body);
 }
@@ -717,13 +727,8 @@ a.seo-pages__path:hover { color: var(--green-500); }
 }
 
 @media (max-width: 900px) {
-  .seo-shell {
-    grid-template-columns: 1fr;
-  }
   .seo-sidebar {
-    position: static;
-    flex-direction: row;
-    overflow-x: auto;
+    position: static; /* small screens: scrolling past it beats pinning it */
   }
 }
 
