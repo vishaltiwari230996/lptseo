@@ -2680,6 +2680,25 @@ export const seoFanout = (id: string, query: string, opts?: RequestOptions) =>
 export const seoFanoutBuild = (id: string, query: string) =>
   postJson<{ fanout: SeoFanoutDoc; recent: string[] }>(`/api/seo-geo/fanout/${id}`, { query });
 
+export interface SeoFanoutBulkResult {
+  query: string;
+  ok: boolean;
+  summary?: { covered: number; weak: number; gap: number };
+  cached?: boolean;
+  error?: string;
+}
+
+export const seoFanoutBulk = (id: string, queries: string[]) =>
+  postJson<{ results: SeoFanoutBulkResult[]; skipped: string[]; recent: string[] }>(
+    `/api/seo-geo/fanout/${id}/bulk`, { queries });
+
+export const seoFanoutRemove = (id: string, queries: string[]) =>
+  requestJson<{ recent: string[] }>(`/api/seo-geo/fanout/${id}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ queries }),
+  });
+
 /* Rank analysis — grounded bullets over the rank digest, cached by sweep. */
 
 export interface SeoRankAnalysis {

@@ -37,7 +37,10 @@ DOC = "fanout-{}-{}"
 INDEX = "fanouts-{}"
 CACHE_HOURS = 24
 MAX_SUBQUERIES = 15
-RECENT_KEEP = 10
+RECENT_KEEP = 20
+#: Paste cap per bulk map — each NEW query spends one SERP + one model call;
+#: anything past the cap is reported as skipped, never silently dropped.
+MAX_BULK = 10
 
 SYSTEM = (
     "You are an AI-search analyst. For the topic in QUERY, list the sub-queries a "
@@ -201,3 +204,43 @@ def build(brand: dict, query: str, search=None, llm=None, now=None) -> dict:
 
     state.mutate(INDEX.format(brand["id"]), change)
     return doc
+
+
+def remove(brand_id: str, queries: list[str]) -> list[str]:
+    """Delete mapped fan-outs (single or many) and drop them from the recent
+    list. Returns what remains. Deleting is local-only — nothing to revoke."""
+    cleaned = [q for q in (queries or []) if _norm(q)]
+    for q in cleaned:
+        state.delete(DOC.format(brand_id, _qhash(q)))
+    gone = {_norm(q) for q in cleaned}
+
+    def change(current: dict) -> tuple[dict, list[str]]:
+        keep = [x for x in current.get("queries", []) if _norm(x) not in gone]
+        return {"queries": keep}, keep
+
+    return state.mutate(INDEX.format(brand_id), change)
+
+
+def build_many(brand: dict, queries: list[str], search=None, llm=None, now=None) -> dict:
+    """Map several head queries in one go (the paste box). Sequential on
+    purpose — each new query is a SERP + model spend and DataForSEO rate-limits
+    bursts; cached ones cost nothing. Per-query outcomes are reported, one bad
+    query never sinks the rest, and everything past MAX_BULK is named as
+    skipped rather than silently dropped."""
+    seen: set[str] = set()
+    cleaned: list[str] = []
+    for q in queries or []:
+        key = _norm(q)
+        if key and key not in seen:
+            seen.add(key)
+            cleaned.append(q.strip())
+    results = []
+    for q in cleaned[:MAX_BULK]:
+        try:
+            doc = build(brand, q, search=search, llm=llm, now=now)
+            results.append({"query": doc["query"], "ok": True,
+                            "summary": doc["summary"], "cached": doc.get("cached", False)})
+        except (ValueError, CredentialMissing) as exc:
+            results.append({"query": q, "ok": False, "error": str(exc)[:200]})
+    skipped = cleaned[MAX_BULK:]
+    return {"results": results, "skipped": skipped}

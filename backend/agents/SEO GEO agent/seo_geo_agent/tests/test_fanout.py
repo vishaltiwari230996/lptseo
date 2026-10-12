@@ -123,3 +123,50 @@ def test_empty_serp_with_dead_model_is_a_query_problem_not_credentials():
 
     with pytest.raises(ValueError, match="broader head query"):
         fanout.build(BRAND, "very narrow query 2031", search=lambda q: empty, llm=no_llm, now=NOW)
+
+
+def test_build_many_caps_reports_and_survives_a_bad_query():
+    calls = []
+
+    def search(q):
+        calls.append(q)
+        if q == "bad one":
+            raise CredentialMissing("serp down for this test")
+        return SERP
+
+    def no_llm(system, prompt):
+        raise CredentialMissing("off")
+
+    queries = ["q one", "bad one", "q one", *[f"filler {i}" for i in range(12)]]
+    try:
+        out = fanout.build_many(BRAND, queries, search=search, llm=no_llm, now=NOW)
+        by_q = {r["query"]: r for r in out["results"]}
+        assert by_q["q one"]["ok"] is True
+        assert by_q["bad one"]["ok"] is False and by_q["bad one"]["error"]  # named, not silent
+        assert len(out["results"]) == fanout.MAX_BULK      # capped
+        assert len(out["skipped"]) == 4                    # 14 unique - 10
+        assert calls.count("q one") == 1                   # deduped before spend
+    finally:
+        for q in queries:
+            state.delete(f"fanout-b-{fanout._qhash(q)}")
+        state.delete("fanouts-b")
+
+
+def test_remove_single_and_multiple():
+    try:
+        fanout.build(BRAND, "alpha", search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+        fanout.build(BRAND, "beta", search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+        fanout.build(BRAND, "gamma", search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+        assert set(fanout.recent("b")) == {"alpha", "beta", "gamma"}
+
+        remaining = fanout.remove("b", ["Beta"])           # case-insensitive single
+        assert set(remaining) == {"alpha", "gamma"}
+        assert fanout.latest("b", "beta") is None          # the doc went too
+
+        remaining = fanout.remove("b", ["alpha", "gamma"])  # multiple at once
+        assert remaining == []
+        assert fanout.latest("b", "alpha") is None
+    finally:
+        for q in ("alpha", "beta", "gamma"):
+            state.delete(f"fanout-b-{fanout._qhash(q)}")
+        state.delete("fanouts-b")

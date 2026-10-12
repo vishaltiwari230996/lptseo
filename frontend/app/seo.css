@@ -1223,3 +1223,7 @@ a.seo-pages__path:hover { color: var(--green-500); }
 
 /* Fan-out panel */
 .seo-fanout__actions { display: flex; gap: 6px; white-space: nowrap; }
+.seo-fanout__form { align-items: stretch; }
+.seo-fanout__paste { flex: 1; min-height: 44px; resize: vertical; font-family: var(--font-sans); }
+.seo-fanout__chip { display: inline-flex; align-items: center; gap: 6px; }
+.seo-fanout__chipopen { border: none; background: none; color: inherit; font: inherit; cursor: pointer; padding: 0; }

@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
-  seoAddCustomQuery, seoBuildBrief, seoFanout, seoFanoutBuild,
+  seoAddCustomQuery, seoBuildBrief, seoFanout, seoFanoutBulk, seoFanoutRemove,
   type SeoFanoutDoc, type SeoFanoutRow,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
@@ -96,17 +96,45 @@ export function FanoutView({ brandId, isCreator, onToast }: {
       .catch(() => { /* an empty panel is a normal first-run state */ });
   }, [brandId, open]);
 
-  async function buildFor(query: string) {
+  async function buildFor(raw: string) {
+    // Same paste grammar as the rank tracker's box: one per line, or commas.
+    const queries = Array.from(new Set(raw.split(/[\n,]/).map((q) => q.trim()).filter(Boolean)));
+    if (!queries.length) return;
     setBuilding(true);
     try {
-      const r = await seoFanoutBuild(brandId, query);
-      setDoc(r.fanout);
+      const r = await seoFanoutBulk(brandId, queries);
       setRecent(r.recent);
       setDraft("");
+      const ok = r.results.filter((x) => x.ok);
+      const failed = r.results.filter((x) => !x.ok);
+      if (ok[0]) open(ok[0].query);
+      if (failed.length) {
+        onToast(`${ok.length} mapped; failed: ${failed.map((f) => `“${f.query}” (${f.error})`).join("; ")}`,
+                ok.length ? "warn" : "error");
+      } else if (queries.length > 1) {
+        onToast(`${ok.length} topics mapped — pick one from the chips`, "ok");
+      }
+      if (r.skipped.length) {
+        onToast(`${r.skipped.length} past the per-paste cap, not mapped: ${r.skipped.join(", ")}`, "warn");
+      }
     } catch (exc) {
       onToast(describeFailure(exc, "Could not map the fan-out"), "error");
     } finally {
       setBuilding(false);
+    }
+  }
+
+  async function removeTopics(queries: string[]) {
+    try {
+      const r = await seoFanoutRemove(brandId, queries);
+      setRecent(r.recent);
+      if (doc && queries.some((q) => q.toLowerCase() === doc.query.toLowerCase())) {
+        setDoc(null);
+        if (r.recent[0]) open(r.recent[0]);
+      }
+      onToast(queries.length === 1 ? `Removed “${queries[0]}”` : `Removed ${queries.length} topics`, "ok");
+    } catch (exc) {
+      onToast(describeFailure(exc, "Could not remove"), "error");
     }
   }
 
@@ -151,9 +179,11 @@ export function FanoutView({ brandId, isCreator, onToast }: {
       </p>
 
       {isCreator ? (
-        <form className="seo-poolbar" onSubmit={(e) => { e.preventDefault(); if (draft.trim()) void buildFor(draft.trim()); }}>
-          <input className="seo-input" value={draft} placeholder="Head query — e.g. clat coaching"
-                 onChange={(e) => setDraft(e.target.value)} aria-label="Head query to fan out" />
+        <form className="seo-poolbar seo-fanout__form"
+              onSubmit={(e) => { e.preventDefault(); if (draft.trim()) void buildFor(draft); }}>
+          <textarea className="seo-input seo-fanout__paste" value={draft} rows={2}
+                    placeholder={"Head queries — one per line (or commas)\ne.g. clat coaching, judiciary exam preparation"}
+                    onChange={(e) => setDraft(e.target.value)} aria-label="Head queries to fan out" />
           <button className="seo-btn seo-btn--primary" type="submit" disabled={building || !draft.trim()}>
             <Icon name="search" size={13} /> {building ? "Mapping…" : "Map the fan-out"}
           </button>
@@ -165,12 +195,20 @@ export function FanoutView({ brandId, isCreator, onToast }: {
       {recent.length > 0 && (
         <div className="seo-cluster__kws">
           {recent.map((q) => (
-            <button key={q} type="button"
-                    className={`seo-chip${doc?.query === q ? " seo-chip--viz-on" : ""}`}
-                    onClick={() => open(q)}>
-              {q}
-            </button>
+            <span key={q} className={`seo-chip seo-fanout__chip${doc?.query === q ? " seo-chip--viz-on" : ""}`}>
+              <button type="button" className="seo-fanout__chipopen" onClick={() => open(q)}>{q}</button>
+              {isCreator && (
+                <button type="button" className="seo-chip__x" aria-label={`Remove ${q}`}
+                        onClick={() => void removeTopics([q])}>×</button>
+              )}
+            </span>
           ))}
+          {isCreator && recent.length > 1 && (
+            <button type="button" className="seo-chip"
+                    onClick={() => void removeTopics(recent)}>
+              Clear all ({recent.length})
+            </button>
+          )}
         </div>
       )}
 

@@ -87,6 +87,10 @@ class QueryIn(BaseModel):
     query: str
 
 
+class QueriesIn(BaseModel):
+    queries: list[str]
+
+
 class KeywordIn(BaseModel):
     keyword: str
 
@@ -930,6 +934,29 @@ def build_fanout(brand_id: str, payload: QueryIn, user=Depends(require_creator),
     act.note(f"Fan-out for “{doc['query']}”: {doc['summary']['gap']} gaps, "
              f"{doc['summary']['weak']} weak, {doc['summary']['covered']} covered")
     return {"fanout": doc, "recent": seo_fanout.recent(brand_id)}
+
+
+@router.post("/seo-geo/fanout/{brand_id}/bulk")
+def build_fanout_bulk(brand_id: str, payload: QueriesIn, user=Depends(require_creator),
+                      act: Activity = trail.records("fanout_bulk", "Mapped several query fan-outs")):
+    """The paste box: up to MAX_BULK head queries in one go, per-query
+    outcomes, anything past the cap named as skipped."""
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    out = seo_fanout.build_many(brand, payload.queries)
+    ok = sum(1 for r in out["results"] if r["ok"])
+    act.note(f"Fan-out bulk: {ok}/{len(out['results'])} mapped"
+             + (f", {len(out['skipped'])} past the cap" if out["skipped"] else ""))
+    return {**out, "recent": seo_fanout.recent(brand_id)}
+
+
+@router.delete("/seo-geo/fanout/{brand_id}")
+def remove_fanout(brand_id: str, payload: QueriesIn, user=Depends(require_creator),
+                  act: Activity = trail.records("fanout_removed", "Removed mapped fan-outs")):
+    _brand_or_404(brand_id)
+    recent = seo_fanout.remove(brand_id, payload.queries)
+    act.note(f"Removed {len(payload.queries)} fan-out(s); {len(recent)} remain")
+    return {"recent": recent}
 
 
 @router.get("/seo-geo/rank-board/{brand_id}")
