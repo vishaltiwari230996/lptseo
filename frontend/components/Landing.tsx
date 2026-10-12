@@ -81,8 +81,12 @@ function MeritBoard() {
   return (
     <div className="lp-board">
       <div className="lp-board__head">
-        <span className="lp-board__title">Where lawpreptutorial.com ranks</span>
-        <span className="lp-board__meta">Google · India</span>
+        <span className="lp-board__title">The climb this console is built for</span>
+        {/* Illustrative movement, real query vocabulary — and said so. The live
+            board inside shows actual Search Console / SERP figures; a landing
+            page presenting invented ranks as fact teaches the reader to
+            distrust the real ones. */}
+        <span className="lp-board__meta">illustration · live ranks after sign-in</span>
       </div>
       {ROWS.map((row, i) => (
         <div
@@ -95,7 +99,7 @@ function MeritBoard() {
           <span className="lp-row__rank" aria-hidden="true">{ranks[i]}</span>
           <span className="lp-row__q">
             {row.q}
-            <span className="sr"> — now ranked {row.to}, up from {row.from}</span>
+            <span className="sr"> — illustrative climb from {row.from} to {row.to}</span>
           </span>
           <span className="lp-row__move" data-shown={movesShown ? "1" : "0"} aria-hidden="true">
             +{row.from - row.to}
