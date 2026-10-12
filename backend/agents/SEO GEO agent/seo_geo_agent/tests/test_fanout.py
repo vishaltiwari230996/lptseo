@@ -170,3 +170,15 @@ def test_remove_single_and_multiple():
         for q in ("alpha", "beta", "gamma"):
             state.delete(f"fanout-b-{fanout._qhash(q)}")
         state.delete("fanouts-b")
+
+
+def test_a_pasted_list_is_rejected_as_a_single_query():
+    """One 'query' holding a whole pasted list must be refused before any
+    spend — it burned a real SERP credit in production and polluted the
+    recent chips with an 800-char blob."""
+    blob = "clat coaching\nclat mock test\nclat syllabus"
+    with pytest.raises(ValueError, match="looks like a list"):
+        fanout.build(BRAND, blob, search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+    long_one = "clat " * 40
+    with pytest.raises(ValueError, match="looks like a list"):
+        fanout.build(BRAND, long_one, search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)

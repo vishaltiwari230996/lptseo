@@ -155,6 +155,13 @@ def build(brand: dict, query: str, search=None, llm=None, now=None) -> dict:
     query = query.strip()
     if not query:
         raise ValueError("Give the head query to fan out")
+    # A pasted LIST arriving as one "query" burned a SERP credit on a 800-char
+    # blob and then sat in the recent chips forever. One head query is a short
+    # phrase; anything with line breaks or novel length is a list.
+    if "\n" in query or len(query) > 120:
+        raise ValueError(
+            "That looks like a list, not one head query — paste it into the box "
+            "(one per line or commas) and each will be mapped separately")
     moment = now or datetime.now(timezone.utc)
 
     cached = latest(brand["id"], query)
