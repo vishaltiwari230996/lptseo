@@ -484,12 +484,25 @@ def _competitor_topic_pool(brand_id: str) -> list[str]:
     return pool
 
 
-def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
-    """Pull data, build insights + to-dos + blog topics for one brand, persist."""
+def run_brand(brand: dict, trigger: str, today: date | None = None, progress=None) -> dict:
+    """Pull data, build insights + to-dos + blog topics for one brand, persist.
+
+    ``progress`` is an optional ``jobs.Progress``: the manual "Refresh data"
+    button runs this as a background job (it fans out to GSC, GA, Serper and
+    two LLM calls — 2+ minutes on a real property, far too long to hold an
+    HTTP request open, which is exactly what it used to do). The weekly cron
+    still calls it inline with ``progress=None``.
+    """
+
+    def phase(name: str) -> None:
+        if progress:
+            progress.phase(name)
+
     end = today or date.today()
     degraded: list[str] = []
     rows: list[QueryStat] = []
     prev_rows: list[QueryStat] = []
+    phase("reading Search Console")
     try:
         # A customer's own OAuth grant wins; the shared service account is the fallback.
         svc = gsc_oauth.service(brand["id"])
@@ -500,6 +513,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
     except CredentialMissing as exc:
         degraded.append(f"Search Console: {exc}")
 
+    phase("building the fix list")
     if rows:
         todos = build_todos(brand["id"], rows, prev_rows)
         summary = _summary(rows, prev_rows, todos)
@@ -517,6 +531,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
             summary = _summary([], [], [])
 
     # Live website analytics (GA4) ride along; the run never fails on them.
+    phase("reading Google Analytics")
     ga = None
     try:
         ga = _ga_section(brand, end)
@@ -528,6 +543,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
             bullets.append(bullet)
 
     # Page-level intelligence rides along too — never fatal to the run.
+    phase("scoring pages")
     corpus = {}
     try:
         corpus = state.load(f"corpus-{brand['id']}") or {}
@@ -546,6 +562,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
     # Site-review findings ride along in the fix list (stable ids keep status).
     todos = (todos + site_brain.site_todos(brand["id"]))[:MAX_TODOS]
 
+    phase("planning blog topics")
     topic_list, topic_notes = topics.build_topics(
         site_brain.effective_seeds(brand), rows, prev_rows,
         corpus_pages=corpus.get("pages"),
@@ -573,6 +590,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None) -> dict:
     # would be circular.
     from . import keyword_pool
 
+    phase("refreshing the keyword pool")
     keyword_pool.build(brand, rows, topics=topic_list, notes=list(degraded))
 
     return run

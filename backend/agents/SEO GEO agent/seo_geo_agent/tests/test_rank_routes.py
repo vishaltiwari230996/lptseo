@@ -306,3 +306,51 @@ def test_brand_edit_preserves_fields_the_form_does_not_carry(client, monkeypatch
     assert saved["ga4_property"] == "properties/123"
     assert saved["serp_country"] == "in"
     assert saved["seeds"] == ["clat coaching"]          # payload still wins
+
+
+# --------------------------- refresh as a background job ---------------------------
+
+def test_refresh_runs_as_a_job_and_detail_reports_it(client, monkeypatch):
+    """POST /run must return immediately with a job — the real run fans out to
+    GSC/GA/Serper/LLM for minutes and used to hold the request open."""
+    import time
+    from seo_geo_agent import insights
+
+    seen = {}
+
+    def fake_run(brand, trigger, today=None, progress=None):
+        seen["trigger"] = trigger
+        if progress:
+            progress.phase("reading Search Console")
+        return {"todos": [], "topics": []}
+
+    monkeypatch.setattr(insights, "run_brand", fake_run)
+    body = client.post("/api/seo-geo/run/b1").json()
+    assert body["job"]["status"] in ("running", "done")
+    assert seen.get("trigger", "").startswith("manual:")
+
+    for _ in range(40):  # the stub finishes almost instantly
+        detail = client.get("/api/seo-geo/brands/b1").json()
+        if detail["run_job"] and detail["run_job"]["status"] == "done":
+            break
+        time.sleep(0.05)
+    assert detail["run_job"]["status"] == "done"
+
+
+def test_run_brand_reports_phases_to_progress():
+    from seo_geo_agent import insights
+
+    class FakeProgress:
+        def __init__(self):
+            self.phases = []
+        def phase(self, name, *, total=0):
+            self.phases.append(name)
+        def step(self, n=1): ...
+        def note(self, line): ...
+
+    progress = FakeProgress()
+    brand = {"id": "b-prog", "name": "B", "domain": "x.com", "seeds": [], "competitors": []}
+    insights.run_brand(brand, trigger="test", progress=progress)
+    assert "reading Search Console" in progress.phases
+    assert "planning blog topics" in progress.phases
+    assert progress.phases.index("reading Search Console") == 0

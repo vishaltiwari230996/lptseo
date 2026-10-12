@@ -195,12 +195,18 @@ def remove_brand(brand_id: str, user=Depends(require_creator),
 @router.post("/seo-geo/run/{brand_id}")
 def run_brand(brand_id: str, user=Depends(get_current_user),
               act: Activity = trail.records("run", "Full SEO refresh", unit=JOB)):
+    """Starts the refresh as a background job and returns at once. It fans out
+    to GSC, GA, Serper and two LLM calls — measured at 132-140s on the real
+    property, which used to be spent holding this request (and the user's
+    button) open. The panel polls ``GET /brands/{id}``'s ``run_job``."""
     brand = _brand_or_404(brand_id)
     _for(act, brand)
-    run = insights.run_brand(brand, trigger=f"manual:{user['email']}")
-    act.note(f"Full SEO refresh — {len(run['todos'])} to-dos, {len(run['topics'])} topics")
-    return {"at": run["at"], "summary": run["summary"], "degraded": run["degraded"],
-            "todo_count": len(run["todos"]), "topic_count": len(run["topics"])}
+    trigger = f"manual:{user.get('email') or user.get('id', 'unknown')}"
+    act.note(f"Full SEO refresh started for {brand['domain']}")
+    job = seo_jobs.start("run", brand_id,
+                         lambda progress: insights.run_brand(brand, trigger=trigger,
+                                                             progress=progress))
+    return {"job": job}
 
 
 def _plan_of_action(brand_id: str, run: dict | None) -> list[dict]:
@@ -233,6 +239,7 @@ def brand_detail(brand_id: str, user=Depends(get_current_user)):
     return {
         "brand": brand,
         "run": run,
+        "run_job": seo_jobs.status("run", brand_id),
         "gsc": {"connected": bool(conn), "property": (conn or {}).get("property")},
         "plan": _plan_of_action(brand_id, run),
         "site_review": seo_site.latest_review(brand_id),

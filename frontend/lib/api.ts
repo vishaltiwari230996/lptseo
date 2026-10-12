@@ -2091,6 +2091,8 @@ export const seoBrandDetail = (id: string, opts?: RequestOptions) =>
   getJson<{
     brand: SeoBrand;
     run: SeoRun | null;
+    /** The background "Refresh data" job, when one is or was running. */
+    run_job?: DeepJob | null;
     gsc?: SeoGscStatus;
     plan?: SeoPlanItem[];
     site_review?: SeoSiteReview | null;
@@ -2105,11 +2107,10 @@ export const seoOauthStart = (brandId: string) =>
 export const seoOauthDisconnect = (brandId: string) =>
   postJson<{ connected: boolean }>(`/api/seo-geo/oauth/disconnect/${brandId}`, {});
 
+/** Starts the refresh as a background job (it takes minutes on a real
+ *  property); poll seoBrandDetail's run_job until it stops running. */
 export const seoRunBrand = (id: string) =>
-  postJson<{ at: string; summary: SeoRunNums; degraded: string[]; todo_count: number; topic_count: number }>(
-    `/api/seo-geo/run/${id}`,
-    {},
-  );
+  postJson<{ job: DeepJob }>(`/api/seo-geo/run/${id}`, {});
 
 export const seoSaveBrand = (b: { id?: string; name: string; domain: string; gsc_property?: string; seeds?: string[] }) =>
   postJson<{ brands: SeoBrand[] }>("/api/seo-geo/brands", b);

@@ -497,8 +497,22 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
     setBusy(true);
     onToast("Analyzing — pulling Search Console and topic data…");
     try {
+      // The refresh is a background job (it fans out to GSC/GA/Serper and the
+      // model — minutes on a real property). Poll the brand detail until the
+      // job stops running, then read the run it produced.
       await seoRunBrand(id);
-      const detail = await seoBrandDetail(id);
+      let detail = await seoBrandDetail(id);
+      const started = Date.now();
+      while (detail.run_job && detail.run_job.status === "running" && detail.run_job.alive) {
+        if (Date.now() - started > 10 * 60_000) break; // never poll forever
+        await new Promise((r) => setTimeout(r, 2500));
+        if (shownBrandId.current !== id) return; // user moved on — stop quietly
+        detail = await seoBrandDetail(id);
+      }
+      if (detail.run_job?.status === "failed") {
+        onToast(`Analysis failed: ${detail.run_job.error ?? "see the server logs"}`, "error");
+        return;
+      }
       // `brand` captured in this closure is the brand at click time; the ref is
       // the one on screen now.
       if (shownBrandId.current === id) {
