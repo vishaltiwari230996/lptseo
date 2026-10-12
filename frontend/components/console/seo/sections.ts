@@ -28,6 +28,7 @@ export const DAILY_SECTIONS: SidebarSection[] = [
   { id: "rank-board", label: "Rank board" },
   { id: "traffic", label: "Traffic & rankings" },
   { id: "keywords", label: "Keywords" },
+  { id: "fanout", label: "Fan-out" },
   { id: "competitors", label: "Competitors" },
   { id: "rank-tracker", label: "Rank tracker" },
   { id: "pages", label: "Pages" },
@@ -46,7 +47,7 @@ export const DEEP_SECTIONS: SidebarSection[] = [
 ];
 
 export type DailySectionId =
-  | "insights" | "rank-board" | "traffic" | "keywords" | "competitors" | "rank-tracker" | "pages" | "tools";
+  | "insights" | "rank-board" | "traffic" | "keywords" | "fanout" | "competitors" | "rank-tracker" | "pages" | "tools";
 export type DeepSectionId =
   | "overview" | "landing" | "sitemap" | "cannibal" | "density" | "speed" | "vitals" | "health";
 

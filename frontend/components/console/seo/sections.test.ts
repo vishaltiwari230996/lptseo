@@ -4,7 +4,7 @@ import { DAILY_SECTIONS, DEEP_SECTIONS, resolveSection } from "./sections";
 describe("workspace section lists", () => {
   it("keeps the day-to-day surfaces in Daily", () => {
     const ids = DAILY_SECTIONS.map((s) => s.id);
-    expect(ids).toEqual(["insights", "rank-board", "traffic", "keywords", "competitors", "rank-tracker", "pages", "tools"]);
+    expect(ids).toEqual(["insights", "rank-board", "traffic", "keywords", "fanout", "competitors", "rank-tracker", "pages", "tools"]);
   });
 
   it("gives Deep analysis one entry per diagnostic, plus vitals and the expert review", () => {

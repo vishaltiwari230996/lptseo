@@ -98,7 +98,8 @@ _ORDERS: dict[str, tuple[str, ...]] = {
 
 _TOPIC_TRIGGERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("ai", ("ai overview", "chatgpt", "perplexity", "gemini", "copilot", "llm",
-            "cited", "citation", "aeo", "ai search", "ai answer", "ai visibility")),
+            "cited", "citation", "aeo", "ai search", "ai answer", "ai visibility",
+            "fan out", "fan-out", "fanout")),
     ("rank", ("rank", "position", "serp", "drop", "fell", "gir", "overtake", "upar",
               "neeche", "competitor", "beat", "outrank")),
     ("technical", ("audit", "canonical", "noindex", "robots", "sitemap", "index",

@@ -17,6 +17,7 @@ import { AskView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
 import { TrafficCharts } from "./charts";
 import { BrandHero, DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
 import { DeepWorkspace } from "./deep";
+import { FanoutView } from "./fanout";
 import { InsightsView } from "./insights";
 import { RankBoardView } from "./rankboard";
 import { RankTrackerView } from "./ranktracker";
@@ -1075,6 +1076,12 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                       </div>
                     );
                   })()}
+                </div>
+              )}
+
+              {workspace === "daily" && dailySection === "fanout" && (
+                <div className="seo-section">
+                  <FanoutView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
                 </div>
               )}
 

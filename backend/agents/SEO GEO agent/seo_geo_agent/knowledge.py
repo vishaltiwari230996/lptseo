@@ -46,6 +46,7 @@ _TRIGGERS: dict[str, tuple[str, ...]] = {
         "claude", "gemini", "copilot", "llm", "cited", "citation", "citations",
         "aeo", " geo", "geo ", "answer engine", "generative", "ai search",
         "ai answer", "ai me", "ai visibility", "llms.txt", "zero-click",
+        "fan out", "fan-out", "fanout",
     ),
     "programmatic_seo": (
         "programmatic", "pseo", "at scale", "scale pages", "template page",

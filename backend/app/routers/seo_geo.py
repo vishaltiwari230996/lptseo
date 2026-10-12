@@ -30,6 +30,7 @@ from seo_geo_agent import insights, keyword_pool as seo_kwpool, keywords as seo_
 from seo_geo_agent import pages as seo_pages
 from seo_geo_agent import priorities as seo_priorities
 from seo_geo_agent import brief as seo_brief
+from seo_geo_agent import fanout as seo_fanout
 from seo_geo_agent import rank_analysis as seo_rank_analysis
 from seo_geo_agent import rank_gap as seo_rank_gap
 from seo_geo_agent import rank_tracker as seo_rank
@@ -903,6 +904,32 @@ def get_brief(brand_id: str, user=Depends(get_current_user)):
     reads over already-persisted digests, so there is nothing to cache and no
     staleness to explain."""
     return {"brief": seo_brief.build(_brand_or_404(brand_id))}
+
+
+@router.get("/seo-geo/fanout/{brand_id}")
+def get_fanout(brand_id: str, query: str = "", user=Depends(get_current_user)):
+    """Cached fan-out map for one head query (no spend), plus the recent list."""
+    _brand_or_404(brand_id)
+    doc = seo_fanout.latest(brand_id, query) if query.strip() else None
+    return {"fanout": doc, "recent": seo_fanout.recent(brand_id)}
+
+
+@router.post("/seo-geo/fanout/{brand_id}")
+def build_fanout(brand_id: str, payload: QueryIn, user=Depends(require_creator),
+                 act: Activity = trail.records("fanout", "Mapped a query fan-out")):
+    """One SERP + one model call, cached a day — creator-gated like every
+    other button that spends credits."""
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    try:
+        doc = seo_fanout.build(brand, payload.query)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CredentialMissing as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    act.note(f"Fan-out for “{doc['query']}”: {doc['summary']['gap']} gaps, "
+             f"{doc['summary']['weak']} weak, {doc['summary']['covered']} covered")
+    return {"fanout": doc, "recent": seo_fanout.recent(brand_id)}
 
 
 @router.get("/seo-geo/rank-board/{brand_id}")

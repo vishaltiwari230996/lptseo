@@ -1220,3 +1220,6 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-viz__panel .deep-h4 { margin: var(--space-5) 0 var(--space-2); }
 .seo-app .mr-section__title { letter-spacing: -0.01em; }
 .seo-viz__big { letter-spacing: -0.02em; }
+
+/* Fan-out panel */
+.seo-fanout__actions { display: flex; gap: 6px; white-space: nowrap; }

@@ -2653,6 +2653,33 @@ export interface SeoRankBoardDoc {
 export const seoRankBoard = (id: string, opts?: RequestOptions) =>
   getJson<SeoRankBoardDoc>(`/api/seo-geo/rank-board/${id}`, opts);
 
+/* Query fan-out — AI answer engines' sub-queries for a topic + our coverage. */
+
+export interface SeoFanoutRow {
+  query: string;
+  sources: string[]; // "paa" | "related" | "ai"
+  covered_by: string;
+  position: number | null;
+  impressions: number;
+  verdict: "covered" | "weak" | "gap";
+}
+
+export interface SeoFanoutDoc {
+  query: string;
+  at: string;
+  subqueries: SeoFanoutRow[];
+  summary: { covered: number; weak: number; gap: number };
+  notes: string[];
+  cached: boolean;
+}
+
+export const seoFanout = (id: string, query: string, opts?: RequestOptions) =>
+  getJson<{ fanout: SeoFanoutDoc | null; recent: string[] }>(
+    `/api/seo-geo/fanout/${id}?query=${encodeURIComponent(query)}`, opts);
+
+export const seoFanoutBuild = (id: string, query: string) =>
+  postJson<{ fanout: SeoFanoutDoc; recent: string[] }>(`/api/seo-geo/fanout/${id}`, { query });
+
 /* Rank analysis — grounded bullets over the rank digest, cached by sweep. */
 
 export interface SeoRankAnalysis {
