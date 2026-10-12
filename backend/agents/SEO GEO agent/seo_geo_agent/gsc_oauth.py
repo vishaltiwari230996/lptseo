@@ -143,18 +143,26 @@ def connection(brand_id: str) -> dict | None:
 REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
 
 
-def disconnect(brand_id: str) -> bool:
-    """Delete our copy of the grant AND revoke it at Google.
+class _Absent(Exception):
+    """The grant is gone — whatever we were about to write must not happen."""
 
-    Deleting only our document left the grant alive in the customer's Google
-    account until they found myaccount.google.com/permissions themselves.
+
+def disconnect(brand_id: str) -> bool:
+    """Take the grant out of the document ATOMICALLY, then revoke it at Google.
+
+    The read and the removal are one transaction (``state.mutate``), so the
+    token we revoke is exactly the token that was stored at that instant — a
+    reconnect racing this cannot slip a fresh token in between "read old" and
+    "delete", which would have revoked the old grant but silently orphaned the
+    new one at Google. The document is left as an empty tombstone rather than
+    deleted: every reader treats ``{}`` as disconnected, and a concurrent
+    reconnect simply writes the full document over it.
+
     Revocation is best-effort — Google being unreachable must not stop the
-    disconnect — and the return says whether it succeeded, so the caller can
-    log the difference honestly."""
-    conn = connection(brand_id)
-    state.delete(f"gsc-auth-{brand_id}")
+    disconnect — and the return says whether it succeeded."""
+    taken = state.mutate(f"gsc-auth-{brand_id}", lambda current: ({}, current))
     revoked = False
-    token = (conn or {}).get("refresh_token")
+    token = (taken or {}).get("refresh_token")
     if token and state.use_network():
         try:
             resp = httpx.post(REVOKE_ENDPOINT, data={"token": token}, timeout=10)
@@ -166,19 +174,37 @@ def disconnect(brand_id: str) -> bool:
 
 def mark_error(brand_id: str, reason: str) -> None:
     """Stamp the stored connection with its last failure, so the dashboard can
-    say "reconnect needed" instead of silently falling back forever."""
-    conn = connection(brand_id)
-    if conn:
-        state.save(f"gsc-auth-{brand_id}",
-                   {**conn, "last_error": str(reason)[:300], "last_error_at": int(time.time())})
+    say "reconnect needed" instead of silently falling back forever.
+
+    Transactional on the CURRENT document, and a no-op when it is absent or
+    empty. The load-then-save this used to be ran from a background job, so a
+    disconnect landing mid-run resurrected the just-revoked token (the stale
+    copy was saved back over the deletion) — and a quick reconnect in the same
+    window was clobbered by the old grant. Found by the commit security review."""
+
+    def change(current: dict) -> tuple[dict, None]:
+        if not current:
+            raise _Absent()  # never recreate a disconnected grant
+        return ({**current, "last_error": str(reason)[:300],
+                 "last_error_at": int(time.time())}, None)
+
+    try:
+        state.mutate(f"gsc-auth-{brand_id}", change)
+    except _Absent:
+        pass
 
 
 def clear_error(brand_id: str) -> None:
-    conn = connection(brand_id)
-    if conn and conn.get("last_error"):
-        conn.pop("last_error", None)
-        conn.pop("last_error_at", None)
-        state.save(f"gsc-auth-{brand_id}", conn)
+    def change(current: dict) -> tuple[dict, None]:
+        if not current or not current.get("last_error"):
+            raise _Absent()  # nothing to clear — write nothing
+        cleaned = {k: v for k, v in current.items() if k not in ("last_error", "last_error_at")}
+        return (cleaned, None)
+
+    try:
+        state.mutate(f"gsc-auth-{brand_id}", change)
+    except _Absent:
+        pass
 
 
 def service(brand_id: str):

@@ -158,6 +158,7 @@ def delete_brand(brand_id: str) -> list[dict]:
     # for a brand that no longer exists was the one exception to "delete means
     # delete", and it was the wrong one.
     gsc_oauth.disconnect(brand_id)
+    state.delete(f"gsc-auth-{brand_id}")  # the tombstone too — the brand is gone
     return brands
 
 

@@ -477,7 +477,9 @@ def test_oauth_complete_stores_connection(monkeypatch):
     assert gsc_oauth.complete(BRAND, "code", "http://cb")["property"] == "sc-domain:x.com"
     assert gsc_oauth.connection("b")["refresh_token"] == "r1"
     gsc_oauth.disconnect("b")
-    assert gsc_oauth.connection("b") is None
+    # Atomic disconnect leaves an empty tombstone rather than deleting the
+    # document — every reader treats falsy as disconnected.
+    assert not gsc_oauth.connection("b")
 
 
 def test_oauth_complete_rejects_wrong_account(monkeypatch):

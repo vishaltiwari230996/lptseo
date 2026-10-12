@@ -82,7 +82,7 @@ def test_disconnect_revokes_at_google(monkeypatch):
                         lambda url, data, timeout: sent.update(url=url, **data) or SimpleNamespace(status_code=200))
     assert gsc_oauth.disconnect("b") is True
     assert sent["url"] == gsc_oauth.REVOKE_ENDPOINT and sent["token"] == "rt-123"
-    assert gsc_oauth.connection("b") is None
+    assert not gsc_oauth.connection("b")  # tombstone or absent — both read as disconnected
 
 
 def test_disconnect_still_deletes_when_revoke_fails(monkeypatch):
@@ -94,7 +94,7 @@ def test_disconnect_still_deletes_when_revoke_fails(monkeypatch):
 
     monkeypatch.setattr(gsc_oauth.httpx, "post", boom)
     assert gsc_oauth.disconnect("b") is False
-    assert gsc_oauth.connection("b") is None  # our copy is gone regardless
+    assert not gsc_oauth.connection("b")  # our copy is gone regardless
 
 
 def test_run_brand_stamps_and_run_persists_series():
@@ -117,3 +117,36 @@ def test_delete_brand_takes_the_grant_with_it(monkeypatch):
     state.save("gsc-auth-doomed", {"refresh_token": "rt", "property": "p"})
     insights.delete_brand("doomed")
     assert gsc_oauth.connection("doomed") is None
+
+
+
+# ------------------- the resurrection race (commit review) -------------------
+
+def test_mark_error_never_recreates_a_disconnected_grant():
+    """A background run failing AFTER a disconnect must not write the stale
+    (revoked) credential back into existence."""
+    state.delete("gsc-auth-b")
+    gsc_oauth.mark_error("b", "token revoked")
+    assert not gsc_oauth.connection("b")  # still gone — not resurrected
+
+
+def test_mark_error_stamps_the_current_doc_not_a_stale_copy():
+    """A reconnect that lands before the failing run's stamp keeps ITS token —
+    the stamp merges onto whatever is stored now, never a copy read earlier."""
+    state.save("gsc-auth-b", {"refresh_token": "rt-NEW", "property": "p2"})
+    try:
+        gsc_oauth.mark_error("b", "old grant failed")
+        conn = gsc_oauth.connection("b")
+        assert conn["refresh_token"] == "rt-NEW"   # the fresh grant survived
+        assert conn["last_error"] == "old grant failed"
+        gsc_oauth.clear_error("b")
+        conn = gsc_oauth.connection("b")
+        assert "last_error" not in conn and conn["refresh_token"] == "rt-NEW"
+    finally:
+        state.delete("gsc-auth-b")
+
+
+def test_clear_error_writes_nothing_when_there_is_nothing():
+    state.delete("gsc-auth-b")
+    gsc_oauth.clear_error("b")
+    assert not gsc_oauth.connection("b")
