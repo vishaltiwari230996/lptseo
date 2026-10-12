@@ -2673,8 +2673,17 @@ export interface SeoFanoutDoc {
   cached: boolean;
 }
 
+export interface SeoFanoutBulkOutcome {
+  at: string;
+  results: SeoFanoutBulkResult[];
+  skipped: string[];
+  ok: number;
+  failed: number;
+}
+
 export const seoFanout = (id: string, query: string, opts?: RequestOptions) =>
-  getJson<{ fanout: SeoFanoutDoc | null; recent: string[] }>(
+  getJson<{ fanout: SeoFanoutDoc | null; recent: string[];
+            job?: DeepJob | null; outcome?: SeoFanoutBulkOutcome | null }>(
     `/api/seo-geo/fanout/${id}?query=${encodeURIComponent(query)}`, opts);
 
 export const seoFanoutBuild = (id: string, query: string) =>
@@ -2689,7 +2698,9 @@ export interface SeoFanoutBulkResult {
 }
 
 export const seoFanoutBulk = (id: string, queries: string[]) =>
-  postJson<{ results: SeoFanoutBulkResult[]; skipped: string[]; recent: string[] }>(
+  postJson<{ results?: SeoFanoutBulkResult[]; skipped?: string[]; recent: string[];
+             /** Present when the paste was big enough to run as a background job. */
+             job?: DeepJob; queued?: number }>(
     `/api/seo-geo/fanout/${id}/bulk`, { queries });
 
 export const seoFanoutRemove = (id: string, queries: string[]) =>

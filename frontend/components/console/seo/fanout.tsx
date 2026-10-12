@@ -8,10 +8,10 @@
  * build a content brief.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   seoAddCustomQuery, seoBuildBrief, seoFanout, seoFanoutBulk, seoFanoutRemove,
-  type SeoFanoutDoc, type SeoFanoutRow,
+  type DeepJob, type SeoFanoutDoc, type SeoFanoutRow,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
@@ -73,7 +73,10 @@ export function FanoutView({ brandId, isCreator, onToast }: {
   const [recent, setRecent] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [building, setBuilding] = useState(false);
+  const [bulkJob, setBulkJob] = useState<DeepJob | null>(null);
   const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
 
   const open = useCallback((query: string) => {
     seoFanout(brandId, query)
@@ -105,8 +108,40 @@ export function FanoutView({ brandId, isCreator, onToast }: {
       const r = await seoFanoutBulk(brandId, queries);
       setRecent(r.recent);
       setDraft("");
-      const ok = r.results.filter((x) => x.ok);
-      const failed = r.results.filter((x) => !x.ok);
+      if (r.job) {
+        // Big paste — it runs like the deep audit: poll until done, then
+        // report the persisted outcome.
+        setBulkJob(r.job);
+        onToast(`Mapping ${r.queued} topics in the background…`, "ok");
+        const poll = async () => {
+          try {
+            const s = await seoFanout(brandId, "");
+            setRecent(s.recent);
+            const running = !!(s.job && s.job.status === "running" && s.job.alive);
+            setBulkJob(s.job ?? null);
+            if (running) {
+              pollTimer.current = setTimeout(poll, 2500);
+              return;
+            }
+            const out = s.outcome;
+            if (out) {
+              const failedRows = out.results.filter((x) => !x.ok);
+              onToast(`${out.ok} topics mapped`
+                + (out.failed ? `; ${out.failed} failed (${failedRows.map((f) => f.query).join(", ")})` : "")
+                + (out.skipped.length ? `; ${out.skipped.length} past the cap` : ""),
+                out.failed ? "warn" : "ok");
+              const first = out.results.find((x) => x.ok);
+              if (first) open(first.query);
+            }
+          } catch {
+            pollTimer.current = setTimeout(poll, 4000); // transient — keep polling
+          }
+        };
+        pollTimer.current = setTimeout(poll, 2500);
+        return;
+      }
+      const ok = (r.results ?? []).filter((x) => x.ok);
+      const failed = (r.results ?? []).filter((x) => !x.ok);
       if (ok[0]) open(ok[0].query);
       if (failed.length) {
         onToast(`${ok.length} mapped; failed: ${failed.map((f) => `“${f.query}” (${f.error})`).join("; ")}`,
@@ -114,7 +149,7 @@ export function FanoutView({ brandId, isCreator, onToast }: {
       } else if (queries.length > 1) {
         onToast(`${ok.length} topics mapped — pick one from the chips`, "ok");
       }
-      if (r.skipped.length) {
+      if (r.skipped?.length) {
         onToast(`${r.skipped.length} past the per-paste cap, not mapped: ${r.skipped.join(", ")}`, "warn");
       }
     } catch (exc) {
@@ -190,6 +225,13 @@ export function FanoutView({ brandId, isCreator, onToast }: {
         </form>
       ) : (
         <p className="seo-note">A creator maps new topics; the results below are shared.</p>
+      )}
+
+      {bulkJob && bulkJob.status === "running" && bulkJob.alive && (
+        <p className="seo-note" role="status">
+          Mapping {bulkJob.done} of {bulkJob.total || "…"} topics — chips fill in live, you can
+          open any of them meanwhile.
+        </p>
       )}
 
       {recent.length > 0 && (

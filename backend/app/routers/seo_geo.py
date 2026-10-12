@@ -915,7 +915,8 @@ def get_fanout(brand_id: str, query: str = "", user=Depends(get_current_user)):
     """Cached fan-out map for one head query (no spend), plus the recent list."""
     _brand_or_404(brand_id)
     doc = seo_fanout.latest(brand_id, query) if query.strip() else None
-    return {"fanout": doc, "recent": seo_fanout.recent(brand_id)}
+    return {"fanout": doc, "recent": seo_fanout.recent(brand_id),
+            **seo_fanout.bulk_status(brand_id)}
 
 
 @router.post("/seo-geo/fanout/{brand_id}")
@@ -943,7 +944,15 @@ def build_fanout_bulk(brand_id: str, payload: QueriesIn, user=Depends(require_cr
     outcomes, anything past the cap named as skipped."""
     brand = _brand_or_404(brand_id)
     _for(act, brand)
-    out = seo_fanout.build_many(brand, payload.queries)
+    queries = seo_fanout._dedupe(payload.queries)
+    if len(queries) > seo_fanout.MAX_BULK:
+        # Too many to hold a request open for — run it like the deep audit.
+        act.note(f"Fan-out bulk started: {min(len(queries), seo_fanout.MAX_BULK_JOB)} topics queued")
+        job = seo_jobs.start(seo_fanout.JOB_KIND, brand_id,
+                             lambda progress: seo_fanout.run_bulk(brand, queries, progress))
+        return {"job": job, "queued": min(len(queries), seo_fanout.MAX_BULK_JOB),
+                "recent": seo_fanout.recent(brand_id)}
+    out = seo_fanout.build_many(brand, queries)
     ok = sum(1 for r in out["results"] if r["ok"])
     act.note(f"Fan-out bulk: {ok}/{len(out['results'])} mapped"
              + (f", {len(out['skipped'])} past the cap" if out["skipped"] else ""))

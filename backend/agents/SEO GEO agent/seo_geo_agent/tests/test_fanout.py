@@ -182,3 +182,26 @@ def test_a_pasted_list_is_rejected_as_a_single_query():
     long_one = "clat " * 40
     with pytest.raises(ValueError, match="looks like a list"):
         fanout.build(BRAND, long_one, search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+
+
+def test_run_bulk_maps_everything_with_progress_and_outcome():
+    class P:
+        def __init__(self): self.steps = 0; self.total = 0; self.notes = []
+        def phase(self, name, *, total=0): self.total = total
+        def step(self, n=1): self.steps += n
+        def note(self, line): self.notes.append(line)
+
+    progress = P()
+    queries = [f"topic {i}" for i in range(14)]  # past the old sync cap of 10
+    try:
+        out = fanout.run_bulk(BRAND, queries, progress,
+                              search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+        assert out["ok"] == 14 and out["failed"] == 0 and out["skipped"] == []
+        assert progress.total == 14 and progress.steps == 14
+        assert fanout.bulk_status("b")["outcome"]["ok"] == 14
+        assert len(fanout.recent("b")) == 14
+    finally:
+        for q in queries:
+            state.delete(f"fanout-b-{fanout._qhash(q)}")
+        state.delete("fanouts-b")
+        state.delete("fanout-bulk-b")

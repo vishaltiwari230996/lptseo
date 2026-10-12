@@ -29,7 +29,7 @@ import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 
-from . import keyword_pool, knowledge, rank_tracker, sources, state
+from . import jobs, keyword_pool, knowledge, rank_tracker, sources, state
 from .sources import CredentialMissing
 from .topics import _tokens
 
@@ -38,9 +38,14 @@ INDEX = "fanouts-{}"
 CACHE_HOURS = 24
 MAX_SUBQUERIES = 15
 RECENT_KEEP = 20
-#: Paste cap per bulk map — each NEW query spends one SERP + one model call;
-#: anything past the cap is reported as skipped, never silently dropped.
+#: Synchronous paste cap — a list this size maps inside one request. Bigger
+#: pastes run as a background job instead of being truncated.
 MAX_BULK = 10
+#: Background-job ceiling per paste: a cost sanity bound, not a UX one. Each
+#: NEW query is one SERP + one model call; cached ones are free.
+MAX_BULK_JOB = 60
+JOB_KIND = "fanout"
+BULK_DOC = "fanout-bulk-{}"
 
 SYSTEM = (
     "You are an AI-search analyst. For the topic in QUERY, list the sub-queries a "
@@ -251,3 +256,45 @@ def build_many(brand: dict, queries: list[str], search=None, llm=None, now=None)
             results.append({"query": q, "ok": False, "error": str(exc)[:200]})
     skipped = cleaned[MAX_BULK:]
     return {"results": results, "skipped": skipped}
+
+
+def _dedupe(queries: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for q in queries or []:
+        key = _norm(q)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(q.strip())
+    return out
+
+
+def run_bulk(brand: dict, queries: list[str], progress, search=None, llm=None, now=None) -> dict:
+    """The big-paste path: map every query as a background job with live
+    progress, then persist one outcome document the panel reads when the job
+    finishes. Per-query failures are entries, never a crashed job."""
+    cleaned = _dedupe(queries)
+    todo, skipped = cleaned[:MAX_BULK_JOB], cleaned[MAX_BULK_JOB:]
+    progress.phase("mapping fan-outs", total=len(todo))
+    results = []
+    for q in todo:
+        try:
+            doc = build(brand, q, search=search, llm=llm, now=now)
+            results.append({"query": doc["query"], "ok": True,
+                            "summary": doc["summary"], "cached": doc.get("cached", False)})
+        except (ValueError, CredentialMissing) as exc:
+            results.append({"query": q, "ok": False, "error": str(exc)[:200]})
+        progress.step()
+    ok = sum(1 for r in results if r["ok"])
+    outcome = {"at": (now or datetime.now(timezone.utc)).isoformat(timespec="seconds"),
+               "results": results, "skipped": skipped,
+               "ok": ok, "failed": len(results) - ok}
+    state.save(BULK_DOC.format(brand["id"]), outcome)
+    progress.note(f"{ok}/{len(results)} topics mapped"
+                  + (f", {len(skipped)} past the {MAX_BULK_JOB} cap" if skipped else ""))
+    return outcome
+
+
+def bulk_status(brand_id: str) -> dict:
+    return {"job": jobs.status(JOB_KIND, brand_id),
+            "outcome": state.load(BULK_DOC.format(brand_id))}
