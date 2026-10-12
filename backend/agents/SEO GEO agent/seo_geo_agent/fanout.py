@@ -57,9 +57,12 @@ def _qhash(query: str) -> str:
     return hashlib.sha1(_norm(query).encode()).hexdigest()[:12]
 
 
-def _gather(query: str, search, llm, notes: list[str]) -> dict[str, dict]:
-    """Candidate sub-queries with provenance: {norm: {query, sources[]}}."""
+def _gather(query: str, search, llm, notes: list[str]) -> tuple[dict[str, dict], bool]:
+    """Candidate sub-queries with provenance, plus whether the live SERP call
+    itself succeeded (an empty-but-successful SERP is a different failure from
+    missing credentials, and the caller words them differently)."""
     out: dict[str, dict] = {}
+    serp_ok = False
 
     def add(label: str, source: str) -> None:
         key = _norm(label)
@@ -71,6 +74,7 @@ def _gather(query: str, search, llm, notes: list[str]) -> dict[str, dict]:
 
     try:
         serp = search(query)
+        serp_ok = True
         for q in serp.get("paa") or []:
             add(q, "paa")
         for q in serp.get("related") or []:
@@ -86,7 +90,7 @@ def _gather(query: str, search, llm, notes: list[str]) -> dict[str, dict]:
     except CredentialMissing as exc:
         notes.append(f"Model unavailable ({exc}) — fan-out is SERP evidence only")
 
-    return out
+    return out, serp_ok
 
 
 def _coverage(brand: dict, sub_norm: str) -> dict:
@@ -162,8 +166,15 @@ def build(brand: dict, query: str, search=None, llm=None, now=None) -> dict:
     search = search or sources.serper_search
     llm = llm or (lambda system, prompt: sources.llm_json(system, prompt, agent_id="a2"))
     notes: list[str] = []
-    candidates = _gather(query, search, llm, notes)
+    candidates, serp_ok = _gather(query, search, llm, notes)
     if not candidates:
+        if serp_ok:
+            # Google answered but had no PAA/related for this phrasing, and the
+            # model could not fill in — a query problem, not a credentials one.
+            raise ValueError(
+                "Google returned no PAA or related searches for this query, and the model "
+                "is unavailable to expand it — try a broader head query (e.g. the topic "
+                "without the city or year)")
         raise CredentialMissing(
             "Neither a live SERP nor the model is available — the fan-out needs at least one "
             "(set the SERP credentials or the OpenRouter key)")

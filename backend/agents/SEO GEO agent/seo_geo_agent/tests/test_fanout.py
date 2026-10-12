@@ -111,3 +111,15 @@ def test_raises_honestly_when_both_sources_are_down():
 
     with pytest.raises(CredentialMissing):
         fanout.build(BRAND, "clat", search=down, llm=down, now=NOW)
+
+
+def test_empty_serp_with_dead_model_is_a_query_problem_not_credentials():
+    """A successful-but-empty SERP plus a dead model must say 'broaden the
+    query', never 'set the credentials' — the credentials were fine."""
+    empty = {"organic": [], "related": [], "paa": [], "aio_present": False}
+
+    def no_llm(system, prompt):
+        raise CredentialMissing("Insufficient credits")
+
+    with pytest.raises(ValueError, match="broader head query"):
+        fanout.build(BRAND, "very narrow query 2031", search=lambda q: empty, llm=no_llm, now=NOW)
