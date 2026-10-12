@@ -240,7 +240,9 @@ def brand_detail(brand_id: str, user=Depends(get_current_user)):
         "brand": brand,
         "run": run,
         "run_job": seo_jobs.status("run", brand_id),
-        "gsc": {"connected": bool(conn), "property": (conn or {}).get("property")},
+        "gsc": {"connected": bool(conn), "property": (conn or {}).get("property"),
+                "needs_reconnect": bool((conn or {}).get("last_error")),
+                "last_error": (conn or {}).get("last_error")},
         "plan": _plan_of_action(brand_id, run),
         "site_review": seo_site.latest_review(brand_id),
     }
@@ -610,9 +612,10 @@ def oauth_disconnect(brand_id: str, user=Depends(require_creator),
                      act: Activity = trail.records("gsc_disconnect",
                                                    "Disconnected Search Console", unit=CHANGE)):
     _for(act, _brand_or_404(brand_id))
-    seo_oauth.disconnect(brand_id)
-    act.note(f"Search Console disconnected for {brand_id}")
-    return {"connected": False}
+    revoked = seo_oauth.disconnect(brand_id)
+    act.note(f"Search Console disconnected for {brand_id}"
+             + (" — grant revoked at Google" if revoked else " — local copy removed; revoke Google-side failed/offline"))
+    return {"connected": False, "revoked": revoked}
 
 
 @router.post("/seo-geo/ask/{brand_id}")

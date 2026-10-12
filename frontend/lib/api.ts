@@ -2050,6 +2050,8 @@ export interface SeoRun {
   todos: SeoTodo[];
   topics: SeoTopic[];
   ga?: SeoGa | null;
+  /** Daily clicks/impressions (112 days) — feeds the traffic charts. */
+  series?: import("@/lib/series").SeoDailyPoint[];
 }
 
 export const seoOverview = (opts?: RequestOptions) =>

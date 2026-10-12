@@ -279,6 +279,37 @@ def _gsc_service():
         raise CredentialMissing(f"Search Console auth unavailable: {exc}") from exc
 
 
+#: Transient Google API statuses worth one more try. 403/401 are NOT here:
+#: they mean "not allowed", and retrying a permission error just triples the
+#: latency of the same honest failure.
+_RETRYABLE_STATUSES = (429, 500, 502, 503)
+_RETRY_DELAYS = (0.5, 1.5)  # two retries, spaced out — three strikes total
+
+
+def _execute_with_retry(request):
+    """``request.execute()`` with bounded retries on transient statuses.
+
+    Search Console and GA both rate-limit (429) and hiccup (5xx) routinely
+    enough that a weekly run used to fail outright on a blip. Anything
+    non-transient raises unchanged on the first attempt.
+    """
+    import time as _time
+
+    from googleapiclient.errors import HttpError
+
+    last: Exception | None = None
+    for delay in (*_RETRY_DELAYS, None):
+        try:
+            return request.execute()
+        except HttpError as exc:
+            status = getattr(getattr(exc, "resp", None), "status", None)
+            if delay is None or int(status or 0) not in _RETRYABLE_STATUSES:
+                raise
+            last = exc
+            _time.sleep(delay)
+    raise last  # pragma: no cover — the loop always returns or raises
+
+
 def gsc_fetch(prop: str, start: date, end: date, service=None) -> list[QueryStat]:
     """Query+page rows for one Search Console property over [start, end]."""
     svc = service or _gsc_service()
@@ -289,7 +320,7 @@ def gsc_fetch(prop: str, start: date, end: date, service=None) -> list[QueryStat
         "rowLimit": 5000,
     }
     try:
-        data = svc.searchanalytics().query(siteUrl=prop, body=body).execute()
+        data = _execute_with_retry(svc.searchanalytics().query(siteUrl=prop, body=body))
     except CredentialMissing:
         raise
     except Exception as exc:  # noqa: BLE001 — 403 = property not shared with our SA
@@ -304,6 +335,34 @@ def gsc_fetch(prop: str, start: date, end: date, service=None) -> list[QueryStat
             position=float(r.get("position", 0.0)),
         )
         for r in data.get("rows", [])
+    ]
+
+
+def gsc_fetch_daily(prop: str, start: date, end: date, service=None) -> list[dict]:
+    """One row per DAY for the property: clicks, impressions, ctr, position.
+
+    Feeds the traffic charts. Separate from :func:`gsc_fetch` (query+page
+    rows) because mixing dimensions multiplies rows; by date alone the
+    response is at most one row per day."""
+    svc = service or _gsc_service()
+    body = {
+        "startDate": start.isoformat(),
+        "endDate": end.isoformat(),
+        "dimensions": ["date"],
+        "rowLimit": 500,
+    }
+    try:
+        data = _execute_with_retry(svc.searchanalytics().query(siteUrl=prop, body=body))
+    except CredentialMissing:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise CredentialMissing(f"Search Console rejected {prop}: {exc}") from exc
+    return [
+        {"date": r["keys"][0], "clicks": int(r.get("clicks", 0)),
+         "impressions": int(r.get("impressions", 0)),
+         "ctr": round(float(r.get("ctr", 0.0)), 4),
+         "position": round(float(r.get("position", 0.0)), 1)}
+        for r in sorted(data.get("rows", []), key=lambda r: r["keys"][0])
     ]
 
 

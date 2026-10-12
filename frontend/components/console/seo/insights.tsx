@@ -23,7 +23,7 @@ function Block({ title, tone, lines, empty, onNavigate }: {
 }) {
   return (
     <section className={`seo-brief__block seo-brief__block--${tone}`}>
-      <h3 className="seo-brief__title">{title}</h3>
+      <h3 className="seo-brief__title"><i className="seo-brief__dot" aria-hidden="true" />{title}</h3>
       {lines.length === 0 ? (
         <p className="seo-note">{empty}</p>
       ) : (
@@ -75,7 +75,7 @@ export function InsightsView({ brandId, onToast, onNavigate }: {
   return (
     <div className="seo-brief">
       <section className="seo-brief__block seo-brief__block--rank">
-        <h3 className="seo-brief__title">Current rank</h3>
+        <h3 className="seo-brief__title"><i className="seo-brief__dot" aria-hidden="true" />Current rank</h3>
         {rank ? (
           <div className="seo-brief__rank">
             <div className="seo-brief__rankstats">

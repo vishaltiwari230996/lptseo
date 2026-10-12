@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { BrandMark, Icon } from "@/lib/kit-ui";
 import { describeFailure, useLoadSession } from "@/lib/load";
 import { AskView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
+import { TrafficCharts } from "./charts";
 import { BrandHero, DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
 import { DeepWorkspace } from "./deep";
 import { InsightsView } from "./insights";
@@ -933,6 +934,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                     </div>
                   ) : (
                     <>
+                      <TrafficCharts series={run.series ?? []} />
                       {run.summary.mode === "rank-tracking" ? (
                         <div className="seo-summary seo-summary--rank">
                           <Donut

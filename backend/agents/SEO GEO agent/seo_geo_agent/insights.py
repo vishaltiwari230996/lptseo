@@ -18,6 +18,7 @@ from .sources import (
     ga_fetch_overview,
     ga_fetch_pages,
     gsc_fetch,
+    gsc_fetch_daily,
 )
 
 # Aggregate organic CTR by position (rounded from public CTR studies). Position
@@ -152,6 +153,11 @@ def delete_brand(brand_id: str) -> list[dict]:
     brands = state.mutate(BRANDS_DOC, change)
     state.delete(f"run-{brand_id}")
     state.delete(f"todos-{brand_id}")
+    # The Search Console grant goes with the brand — delete our copy AND
+    # revoke it at Google (best-effort). Leaving a live refresh token behind
+    # for a brand that no longer exists was the one exception to "delete means
+    # delete", and it was the wrong one.
+    gsc_oauth.disconnect(brand_id)
     return brands
 
 
@@ -503,6 +509,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None, progress=Non
     rows: list[QueryStat] = []
     prev_rows: list[QueryStat] = []
     phase("reading Search Console")
+    series: list[dict] = []
     try:
         # A customer's own OAuth grant wins; the shared service account is the fallback.
         svc = gsc_oauth.service(brand["id"])
@@ -510,8 +517,17 @@ def run_brand(brand: dict, trigger: str, today: date | None = None, progress=Non
         prop = conn["property"] if conn else (brand.get("gsc_property") or f"sc-domain:{brand['domain']}")
         rows = gsc_fetch(prop, end - timedelta(days=28), end, service=svc)
         prev_rows = gsc_fetch(prop, end - timedelta(days=56), end - timedelta(days=29), service=svc)
+        # Daily series for the traffic charts: 12 weeks + the 28 days before
+        # them, so week-on-week AND month-on-month both have a full baseline.
+        series = gsc_fetch_daily(prop, end - timedelta(days=112), end, service=svc)
+        if conn:
+            gsc_oauth.clear_error(brand["id"])  # the grant demonstrably works
     except CredentialMissing as exc:
         degraded.append(f"Search Console: {exc}")
+        # A failing CUSTOMER grant must say so on the dashboard ("reconnect"),
+        # not silently degrade forever. The shared-service-account path has no
+        # stored connection, so this is a no-op there.
+        gsc_oauth.mark_error(brand["id"], str(exc))
 
     phase("building the fix list")
     if rows:
@@ -580,6 +596,7 @@ def run_brand(brand: dict, trigger: str, today: date | None = None, progress=Non
         "todos": todos,
         "topics": topic_list,
         "ga": ga,
+        "series": series,  # daily clicks/impressions — the charts read this
     }
     state.save(f"run-{brand['id']}", run)
 

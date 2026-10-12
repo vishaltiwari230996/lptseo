@@ -140,8 +140,45 @@ def connection(brand_id: str) -> dict | None:
     return state.load(f"gsc-auth-{brand_id}")
 
 
-def disconnect(brand_id: str) -> None:
+REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
+
+
+def disconnect(brand_id: str) -> bool:
+    """Delete our copy of the grant AND revoke it at Google.
+
+    Deleting only our document left the grant alive in the customer's Google
+    account until they found myaccount.google.com/permissions themselves.
+    Revocation is best-effort — Google being unreachable must not stop the
+    disconnect — and the return says whether it succeeded, so the caller can
+    log the difference honestly."""
+    conn = connection(brand_id)
     state.delete(f"gsc-auth-{brand_id}")
+    revoked = False
+    token = (conn or {}).get("refresh_token")
+    if token and state.use_network():
+        try:
+            resp = httpx.post(REVOKE_ENDPOINT, data={"token": token}, timeout=10)
+            revoked = resp.status_code == 200
+        except httpx.HTTPError:
+            revoked = False
+    return revoked
+
+
+def mark_error(brand_id: str, reason: str) -> None:
+    """Stamp the stored connection with its last failure, so the dashboard can
+    say "reconnect needed" instead of silently falling back forever."""
+    conn = connection(brand_id)
+    if conn:
+        state.save(f"gsc-auth-{brand_id}",
+                   {**conn, "last_error": str(reason)[:300], "last_error_at": int(time.time())})
+
+
+def clear_error(brand_id: str) -> None:
+    conn = connection(brand_id)
+    if conn and conn.get("last_error"):
+        conn.pop("last_error", None)
+        conn.pop("last_error_at", None)
+        state.save(f"gsc-auth-{brand_id}", conn)
 
 
 def service(brand_id: str):
