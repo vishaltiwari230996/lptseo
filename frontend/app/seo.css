@@ -1217,6 +1217,6 @@ a.seo-pages__path:hover { color: var(--green-500); }
 }
 
 /* Rhythm: more air above a heading than below it, consistent section gaps. */
-.seo-app .deep-h4 { margin: var(--space-5) 0 var(--space-2); }
+.seo-viz__panel .deep-h4 { margin: var(--space-5) 0 var(--space-2); }
 .seo-app .mr-section__title { letter-spacing: -0.01em; }
 .seo-viz__big { letter-spacing: -0.02em; }
