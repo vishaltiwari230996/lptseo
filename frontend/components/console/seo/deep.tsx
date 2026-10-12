@@ -113,7 +113,7 @@ function JobBar({ job, label }: { job: DeepJob | null; label: string }) {
         <span>{job.phase}{job.total ? ` · ${fmt(job.done)} of ${fmt(job.total)}` : ""}</span>
       </div>
       {pct != null && (
-        <div className="deep-job__track"><span style={{ width: `${pct}%` }} /></div>
+        <div className="deep-job__track"><span style={{ transform: `scaleX(${pct / 100})` }} /></div>
       )}
     </div>
   );

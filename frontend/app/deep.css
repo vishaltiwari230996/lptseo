@@ -40,7 +40,7 @@
 }
 @keyframes deep-spin { to { transform: rotate(360deg); } }
 .seo-app .deep-job__track { height: 6px; border-radius: 999px; background: var(--surface-active); overflow: hidden; }
-.seo-app .deep-job__track span { display: block; height: 100%; background: var(--brand); transition: width 400ms var(--ease-out); }
+.seo-app .deep-job__track span { display: block; height: 100%; width: 100%; background: var(--brand); transform-origin: left; transform: scaleX(0); transition: transform 400ms var(--ease-out); }
 
 /* ---- stats -------------------------------------------------------------- */
 .seo-app .deep-overview,
@@ -49,25 +49,43 @@
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   gap: 10px;
 }
+/* Stat tiles in the same floating-glass family as the Insights brief —
+   translucent over the ambient wash, one soft offset shadow, no painted
+   flank. Tone lives in a small dot beside the label and in the value's own
+   ink. (No backdrop-filter here: a dozen blurred tiles jank scrolling for a
+   effect the translucency already carries at this size.) */
 .seo-app .deep-stat {
-  display: grid; gap: 2px; align-content: start;
-  padding: 11px 14px;
-  border: 1px solid var(--border-subtle);
-  border-left: 3px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface-card);
+  display: grid; gap: 3px; align-content: start;
+  padding: 13px 16px;
+  background: color-mix(in srgb, var(--surface-card) 78%, transparent);
+  border: 1px solid color-mix(in srgb, var(--surface-card) 45%, var(--border));
+  border-radius: 14px;
+  box-shadow: 0 8px 22px -14px color-mix(in srgb, var(--brand) 26%, #00000050);
   min-width: 0;
 }
-.seo-app .deep-stat span { font: 500 12px/1.35 var(--font-sans); color: var(--text-tertiary); }
-.seo-app .deep-stat strong {
-  font: 650 20px/1.2 var(--font-display);
-  font-variant-numeric: tabular-nums; letter-spacing: -0.03em;
+.seo-app .deep-stat span {
+  font: 600 11px/1.35 var(--font-sans);
+  letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-tertiary);
 }
-.seo-app .deep-stat--good { border-left-color: var(--green-500); }
+.seo-app .deep-stat span::before {
+  content: "";
+  display: inline-block;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  margin-right: 7px;
+  vertical-align: 1px;
+  background: var(--border);
+}
+.seo-app .deep-stat strong {
+  font: 650 22px/1.2 var(--font-display);
+  font-variant-numeric: tabular-nums; letter-spacing: -0.02em;
+}
+.seo-app .deep-stat--good span::before { background: var(--green-500); }
 .seo-app .deep-stat--good strong { color: var(--green-600); }
-.seo-app .deep-stat--warn { border-left-color: var(--amber-500); }
+.seo-app .deep-stat--warn span::before { background: var(--amber-500); }
 .seo-app .deep-stat--warn strong { color: var(--amber-600); }
-.seo-app .deep-stat--bad { border-left-color: var(--red-500); }
+.seo-app .deep-stat--bad span::before { background: var(--red-500); }
 .seo-app .deep-stat--bad strong { color: var(--red-600); }
 
 /* ---- tabs --------------------------------------------------------------- */
