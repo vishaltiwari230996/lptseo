@@ -1094,3 +1094,9 @@ a.seo-pages__path:hover { color: var(--green-500); }
   cursor: pointer;
 }
 .seo-insights-panel__more:hover { color: var(--text-primary); text-decoration: underline; }
+
+/* Sign out sits at the topbar's edge, after the source chips. */
+.seo-signout {
+  margin-left: var(--space-2);
+  white-space: nowrap;
+}

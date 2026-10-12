@@ -348,7 +348,7 @@ function AddBrandForm({ onSaved, onToast }: { onSaved: () => void; onToast: Toas
 }
 
 export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => void }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const [overview, setOverview] = useState<SeoOverview | null>(null);
   const [brand, setBrand] = useState<SeoBrand | null>(null);
   const [run, setRun] = useState<SeoRun | null>(null);
@@ -620,6 +620,17 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
             <span className={`seo-chip ${sources.serp ? "seo-chip--on" : "seo-chip--off"}`}>Google SERP</span>
           </div>
         )}
+        {/* logout() clears the token and storage; page.tsx then lands on the
+            marketing page. Labelled with who is signed in, so a shared machine
+            shows at a glance whose session this is. */}
+        <button
+          type="button"
+          className="seo-btn seo-signout"
+          title={user?.email ? `Signed in as ${user.email}` : undefined}
+          onClick={logout}
+        >
+          <Icon name="log-out" size={13} /> Sign out
+        </button>
       </header>
 
       <div className="mr-body">
