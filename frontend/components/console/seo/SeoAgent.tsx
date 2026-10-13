@@ -181,53 +181,86 @@ function ago(iso: string | null): string {
   return new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
-/** The hero speaks in the day's actual reading — movement, today's work, the
- *  biggest rival, freshness — every line clickable to its evidence. Falls
- *  back to the old run-summary sentence when rank data hasn't arrived. */
+/** The hero is a proper reading instrument now, not a sentence of links:
+ *  four KPI cells (movement · fixes · gaps · rival), each a big value with a
+ *  caption and one action line, the whole cell clickable to its evidence —
+ *  then a freshness footer with a real re-run control. Falls back to the old
+ *  run-summary sentence when rank data hasn't arrived. */
+function HeroCell({ label, value, tone, sub, onClick }: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "good" | "bad";
+  sub: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" className="seo-kpi" onClick={onClick}>
+      <span className="seo-kpi__label">{label}</span>
+      <span className={`seo-kpi__value${tone ? ` seo-kpi__value--${tone}` : ""}`}>{value}</span>
+      <span className="seo-kpi__sub">{sub}</span>
+    </button>
+  );
+}
+
 function HeroStory({ hero, run, onNavigate }: {
   hero: SeoHero | null; run: SeoRun | null; onNavigate: (id: string) => void;
 }) {
   if (!hero || (!hero.movement && !hero.rank_share)) return <Story run={run} />;
   const m = hero.movement;
   const worst = m?.worst ?? null;
+  const moved = !!m && (m.up > 0 || m.down > 0 || m.dropouts > 0);
+
   return (
-    <div className="seo-story seo-story--live">
-      {m && (
-        <p>
-          {m.up > 0 && <strong className="seo-brief__good">▲ {m.up} climbed</strong>}
-          {m.up > 0 && (m.down > 0 || m.dropouts > 0) && " · "}
-          {m.down > 0 && <strong className="seo-brief__bad">▼ {m.down} fell</strong>}
-          {m.down > 0 && m.dropouts > 0 && " · "}
-          {m.dropouts > 0 && <strong className="seo-brief__bad">{m.dropouts} dropped out</strong>}
-          {m.up === 0 && m.down === 0 && m.dropouts === 0 && <strong>Ranks steady this week</strong>}
-          {worst && (
-            <> — <button type="button" className="seo-story__link" onClick={() => onNavigate("rank-board")}>
-              &lsquo;{worst.query}&rsquo; #{worst.from}→#{worst.to}
-              {worst.leader ? ` (${worst.leader} ahead)` : ""}
-            </button></>
-          )}
-        </p>
-      )}
-      <p>
-        <button type="button" className="seo-story__link" onClick={() => onNavigate("insights")}>
-          {hero.today.immediate} immediate fix{hero.today.immediate === 1 ? "" : "es"}
-        </button>
-        {" · "}
-        <button type="button" className="seo-story__link" onClick={() => onNavigate("fanout")}>
-          {hero.today.fanout_gaps} content gap{hero.today.fanout_gaps === 1 ? "" : "s"} mapped
-        </button>
-        {hero.pressure && hero.pressure.above_us_on >= 3 && (
-          <> · <button type="button" className="seo-story__link" onClick={() => onNavigate("rank-board")}>
-            {hero.pressure.domain} ahead on {hero.pressure.above_us_on} queries
-          </button></>
+    <div className="seo-herostory">
+      <div className="seo-herogrid">
+        {m && (
+          <HeroCell
+            label="This week"
+            tone={m.down + m.dropouts > m.up ? "bad" : moved ? "good" : undefined}
+            value={moved
+              ? <>
+                  {m.up > 0 && <span className="seo-kpi__updown seo-kpi__updown--up">▲{m.up}</span>}
+                  {m.down > 0 && <span className="seo-kpi__updown seo-kpi__updown--down">▼{m.down}</span>}
+                  {m.dropouts > 0 && <span className="seo-kpi__updown seo-kpi__updown--down">✕{m.dropouts}</span>}
+                </>
+              : "Steady"}
+            sub={worst
+              ? `'${worst.query}' #${worst.from}→#${worst.to}${worst.leader ? ` · ${worst.leader} ahead` : ""}`
+              : moved ? "ranks moved — open the board" : "no rank moved this week"}
+            onClick={() => onNavigate("rank-board")}
+          />
         )}
-      </p>
+        <HeroCell
+          label="Fix now"
+          tone={hero.today.immediate > 0 ? "bad" : "good"}
+          value={hero.today.immediate}
+          sub={hero.today.immediate === 1 ? "immediate fix waiting" : "immediate fixes waiting"}
+          onClick={() => onNavigate("insights")}
+        />
+        <HeroCell
+          label="Write next"
+          value={hero.today.fanout_gaps}
+          sub="content gaps mapped in Fan-out"
+          onClick={() => onNavigate("fanout")}
+        />
+        {hero.pressure && (
+          <HeroCell
+            label="Biggest rival"
+            tone="bad"
+            value={<span className="seo-kpi__name">{hero.pressure.domain.replace(/^www\./, "")}</span>}
+            sub={`ahead of us on ${hero.pressure.above_us_on}${hero.rank_share ? ` of ${hero.rank_share.tracked}` : ""} tracked queries`}
+            onClick={() => onNavigate("rank-board")}
+          />
+        )}
+      </div>
       <p className="seo-story__meta">
-        Ranks checked {ago(hero.freshness.ranks_at)}
-        {" · "}deep audit {hero.freshness.audit_at ? ago(hero.freshness.audit_at) : "never"}
+        Ranks checked {ago(hero.freshness.ranks_at)} · deep audit{" "}
+        {hero.freshness.audit_at ? ago(hero.freshness.audit_at) : "never"}
         {hero.freshness.audit_stale && (
-          <> — <button type="button" className="seo-story__link"
-                       onClick={() => onNavigate("overview")}>re-run?</button></>
+          <button type="button" className="seo-btn seo-btn--xs"
+                  onClick={() => onNavigate("overview")}>
+            <Icon name="refresh-cw" size={11} /> Re-run audit
+          </button>
         )}
       </p>
     </div>
