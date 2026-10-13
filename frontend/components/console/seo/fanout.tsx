@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   seoAddCustomQuery, seoBuildBrief, seoFanout, seoFanoutBulk, seoFanoutRemove,
-  type DeepJob, type SeoFanoutDoc, type SeoFanoutRow,
+  type DeepJob, type SeoFanoutDoc, type SeoFanoutOverview, type SeoFanoutRow,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
@@ -71,6 +71,7 @@ export function FanoutView({ brandId, isCreator, onToast }: {
 }) {
   const [doc, setDoc] = useState<SeoFanoutDoc | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
+  const [overview, setOverview] = useState<SeoFanoutOverview | null>(null);
   const [draft, setDraft] = useState("");
   const [building, setBuilding] = useState(false);
   const [bulkJob, setBulkJob] = useState<DeepJob | null>(null);
@@ -82,6 +83,7 @@ export function FanoutView({ brandId, isCreator, onToast }: {
     seoFanout(brandId, query)
       .then((r) => {
         setRecent(r.recent);
+        if (r.overview !== undefined) setOverview(r.overview ?? null);
         if (r.fanout) setDoc(r.fanout);
         else if (query) void buildFor(query); // not cached yet — build it
       })
@@ -94,6 +96,7 @@ export function FanoutView({ brandId, isCreator, onToast }: {
     seoFanout(brandId, "")
       .then((r) => {
         setRecent(r.recent);
+        setOverview(r.overview ?? null);
         if (r.recent[0]) open(r.recent[0]); // land on the last mapped topic
       })
       .catch(() => { /* an empty panel is a normal first-run state */ });
@@ -207,6 +210,38 @@ export function FanoutView({ brandId, isCreator, onToast }: {
           {doc?.cached ? <span className="seo-chip" title="Served from the day's cache">cached</span> : null}
         </h3>
       </div>
+      {overview && (
+        <div className="seo-herogrid seo-fanout__overview">
+          <div className="seo-kpi seo-kpi--still">
+            <span className="seo-kpi__label">Topics mapped</span>
+            <span className="seo-kpi__value">{overview.topics}</span>
+            <span className="seo-kpi__sub">head queries with a live fan-out</span>
+          </div>
+          <div className="seo-kpi seo-kpi--still">
+            <span className="seo-kpi__label">Content gaps</span>
+            <span className="seo-kpi__value seo-kpi__value--bad">{overview.gap}</span>
+            <span className="seo-kpi__sub">sub-queries with no page — the writing queue</span>
+          </div>
+          <div className="seo-kpi seo-kpi--still">
+            <span className="seo-kpi__label">Weak</span>
+            <span className="seo-kpi__value">{overview.weak}</span>
+            <span className="seo-kpi__sub">page exists, not ranking top-10</span>
+          </div>
+          <div className="seo-kpi seo-kpi--still">
+            <span className="seo-kpi__label">Covered</span>
+            <span className="seo-kpi__value seo-kpi__value--good">{overview.covered}</span>
+            <span className="seo-kpi__sub">already answered top-10</span>
+          </div>
+          {overview.top_gaps[0] && (
+            <button type="button" className="seo-kpi" onClick={() => open(overview.top_gaps[0].query)}>
+              <span className="seo-kpi__label">Biggest gap topic</span>
+              <span className="seo-kpi__value"><span className="seo-kpi__name">{overview.top_gaps[0].query}</span></span>
+              <span className="seo-kpi__sub">{overview.top_gaps[0].gap} gaps — open it</span>
+            </button>
+          )}
+        </div>
+      )}
+
       <p className="seo-note" style={{ maxWidth: "42rem" }}>
         AI answers don&apos;t retrieve for one query — they fan out into the questions around it.
         Map a topic to see every sub-query Google and the model expect, and whether a page of

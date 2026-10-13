@@ -164,8 +164,25 @@ SYSTEM = (
 )
 
 
-def ask(brand: dict, question: str) -> dict:
+#: Turns of chat context the model sees. Enough to follow "aur uske baad?",
+#: small enough that DATA stays the loudest thing in the prompt.
+MAX_HISTORY_TURNS = 6
+
+
+def ask(brand: dict, question: str, history: list[dict] | None = None) -> dict:
+    """One grounded answer. ``history`` is prior turns ([{role, text}]) so a
+    follow-up question keeps its thread — the DATA block is still rebuilt
+    fresh every call and stays the only source of brand facts."""
     system = f"{SYSTEM}\n\nEXPERT PLAYBOOK:\n{knowledge.for_question(question)}"
-    answer = sources.llm_text(
-        system, f"DATA:\n{_context(brand, question)}\n\nQUESTION: {question}")
+    convo = ""
+    for turn in (history or [])[-MAX_HISTORY_TURNS:]:
+        who = "OWNER" if turn.get("role") == "user" else "YOU"
+        text = str(turn.get("text", ""))[:600]
+        if text:
+            convo += f"{who}: {text}\n"
+    prompt = f"DATA:\n{_context(brand, question)}\n\n"
+    if convo:
+        prompt += f"CONVERSATION SO FAR:\n{convo}\n"
+    prompt += f"QUESTION: {question}"
+    answer = sources.llm_text(system, prompt)
     return {"question": question, "answer": answer}

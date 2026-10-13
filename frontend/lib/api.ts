@@ -2343,8 +2343,10 @@ export const seoDraftScore = (brandId: string, text: string, keyword: string) =>
 export const seoUpdatePlan = (brandId: string, page: string) =>
   postJson<SeoUpdatePlan>(`/api/seo-geo/update-plan/${brandId}`, { page });
 
-export const seoAsk = (brandId: string, question: string) =>
-  postJson<{ question: string; answer: string }>(`/api/seo-geo/ask/${brandId}`, { question });
+export interface SeoAskTurn { role: "user" | "agent"; text: string }
+
+export const seoAsk = (brandId: string, question: string, history: SeoAskTurn[] = []) =>
+  postJson<{ question: string; answer: string }>(`/api/seo-geo/ask/${brandId}`, { question, history });
 
 /* ---------------------------------------------------------------- blog writer (a9) */
 
@@ -2691,6 +2693,14 @@ export interface SeoFanoutRow {
   verdict: "covered" | "weak" | "gap";
 }
 
+export interface SeoFanoutOverview {
+  topics: number;
+  covered: number;
+  weak: number;
+  gap: number;
+  top_gaps: { query: string; gap: number }[];
+}
+
 export interface SeoFanoutDoc {
   query: string;
   at: string;
@@ -2710,6 +2720,7 @@ export interface SeoFanoutBulkOutcome {
 
 export const seoFanout = (id: string, query: string, opts?: RequestOptions) =>
   getJson<{ fanout: SeoFanoutDoc | null; recent: string[];
+            overview?: SeoFanoutOverview | null;
             job?: DeepJob | null; outcome?: SeoFanoutBulkOutcome | null }>(
     `/api/seo-geo/fanout/${id}?query=${encodeURIComponent(query)}`, opts);
 

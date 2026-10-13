@@ -114,8 +114,14 @@ class DraftIn(BaseModel):
     keyword: str
 
 
+class AskTurn(BaseModel):
+    role: str
+    text: str
+
+
 class AskIn(BaseModel):
     question: str
+    history: list[AskTurn] = []
 
 
 def _rows_28d(brand: dict) -> tuple[list, list[str]]:
@@ -644,7 +650,8 @@ def ask_expert(brand_id: str, payload: AskIn, user=Depends(get_current_user),
     if not question:
         raise HTTPException(status_code=422, detail="Ask a question")
     try:
-        answer = seo_advisor.ask(brand, question)
+        answer = seo_advisor.ask(brand, question,
+                                 history=[t.model_dump() for t in payload.history])
     except CredentialMissing as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     act.note(f"Asked: {question}")
@@ -951,6 +958,7 @@ def get_fanout(brand_id: str, query: str = "", user=Depends(get_current_user)):
     _brand_or_404(brand_id)
     doc = seo_fanout.latest(brand_id, query) if query.strip() else None
     return {"fanout": doc, "recent": seo_fanout.recent(brand_id),
+            "overview": seo_fanout.overview(brand_id),
             **seo_fanout.bulk_status(brand_id)}
 
 

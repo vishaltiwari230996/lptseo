@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/auth";
 import { BrandMark, Icon } from "@/lib/kit-ui";
 import { describeFailure, useLoadSession } from "@/lib/load";
 import { AskView, BriefsView, CompetitorsView, KeywordsView } from "./labs";
+import { ChatDock } from "./chatdock";
 import { TrafficCharts } from "./charts";
 import { BrandHero, DashboardTiles, KeywordPoolView, VitalsView } from "./dashboard";
 import { DeepWorkspace } from "./deep";
@@ -1267,6 +1268,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                 </div>
               )}
             </Shell>
+            <ChatDock brandId={brand.id} brandName={brand.name} />
           </div>
         )}
       </div>

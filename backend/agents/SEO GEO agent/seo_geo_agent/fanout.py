@@ -298,3 +298,22 @@ def run_bulk(brand: dict, queries: list[str], progress, search=None, llm=None, n
 def bulk_status(brand_id: str) -> dict:
     return {"job": jobs.status(JOB_KIND, brand_id),
             "outcome": state.load(BULK_DOC.format(brand_id))}
+
+
+def overview(brand_id: str) -> dict | None:
+    """One reading across every mapped topic: totals by verdict and the
+    topics with the most gaps — the content team's queue, ranked."""
+    topics = []
+    totals = {"covered": 0, "weak": 0, "gap": 0}
+    for q in recent(brand_id):
+        doc = latest(brand_id, q)
+        if not doc:
+            continue
+        s = doc.get("summary") or {}
+        for k in totals:
+            totals[k] += int(s.get(k) or 0)
+        topics.append({"query": doc["query"], "gap": int(s.get("gap") or 0)})
+    if not topics:
+        return None
+    topics.sort(key=lambda t: -t["gap"])
+    return {"topics": len(topics), **totals, "top_gaps": topics[:5]}

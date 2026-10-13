@@ -181,3 +181,17 @@ def test_ask_sends_knowledge_and_grounded_data(monkeypatch):
     assert "answer-first" in sent["system"].lower() or "extractab" in sent["system"].lower()
     assert "DATA:" in sent["prompt"]
     json.loads(sent["prompt"].split("DATA:\n", 1)[1].rsplit("\n\nQUESTION:", 1)[0])
+
+
+def test_ask_threads_the_conversation(monkeypatch):
+    sent = {}
+    monkeypatch.setattr(advisor.sources, "llm_text",
+                        lambda system, prompt: sent.update(prompt=prompt) or "ok")
+    advisor.ask(BRAND, "aur uske baad kya karun?", history=[
+        {"role": "user", "text": "sabse pehle kya fix karun?"},
+        {"role": "agent", "text": "Pehle 'clat 2027' ka title."},
+    ])
+    assert "CONVERSATION SO FAR:" in sent["prompt"]
+    assert "OWNER: sabse pehle" in sent["prompt"]
+    assert "YOU: Pehle 'clat 2027'" in sent["prompt"]
+    assert sent["prompt"].rstrip().endswith("QUESTION: aur uske baad kya karun?")

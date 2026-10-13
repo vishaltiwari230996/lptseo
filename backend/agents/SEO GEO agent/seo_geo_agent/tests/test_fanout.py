@@ -205,3 +205,23 @@ def test_run_bulk_maps_everything_with_progress_and_outcome():
             state.delete(f"fanout-b-{fanout._qhash(q)}")
         state.delete("fanouts-b")
         state.delete("fanout-bulk-b")
+
+
+def test_overview_aggregates_every_mapped_topic():
+    try:
+        fanout.build(BRAND, "alpha", search=lambda q: SERP, llm=lambda s, p: LLM, now=NOW)
+        fanout.build(BRAND, "beta",
+                     search=lambda q: {**SERP, "paa": ["x?", "y?", "z?"], "related": []},
+                     llm=lambda s, p: {"queries": []}, now=NOW)
+        ov = fanout.overview("b")
+        assert ov["topics"] == 2
+        assert ov["gap"] == sum(t["gap"] for t in ov["top_gaps"])
+        assert ov["top_gaps"][0]["gap"] >= ov["top_gaps"][-1]["gap"]  # ranked
+    finally:
+        for q in ("alpha", "beta"):
+            state.delete(f"fanout-b-{fanout._qhash(q)}")
+        state.delete("fanouts-b")
+
+
+def test_overview_none_when_nothing_mapped():
+    assert fanout.overview("nobody") is None
