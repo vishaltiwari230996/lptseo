@@ -6,7 +6,7 @@ import {
   seoOverview, seoKeywordPool, seoPages, seoPagesRefresh, seoRunBrand, seoSaveBrand,
   seoSitemap, seoVitals,
   type SeoBrand, type SeoGa, type SeoGscStatus, type SeoKeywordLab, type SeoKeywordPoolDoc,
-  type SeoOverview, type SeoPagesDoc, type SeoRun, type SeoSiteReview, type SeoSitemapDoc,
+  type SeoHero, type SeoOverview, type SeoPagesDoc, type SeoRun, type SeoSiteReview, type SeoSitemapDoc,
   type SeoTopic, type SeoVitalsDoc,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
@@ -168,6 +168,70 @@ function pctPhrase(now: number, prev: number): string {
   const d = Math.round(((now - prev) / prev) * 100);
   if (d === 0) return "steady vs the month before";
   return d > 0 ? `up ${d}% vs the month before` : `down ${Math.abs(d)}% vs the month before`;
+}
+
+/** Relative "2h ago" from an ISO stamp; the date itself past a day. */
+function ago(iso: string | null): string {
+  if (!iso) return "never";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return iso;
+  const mins = Math.round((Date.now() - t) / 60_000);
+  if (mins < 60) return `${Math.max(1, mins)}m ago`;
+  if (mins < 48 * 60) return `${Math.round(mins / 60)}h ago`;
+  return new Date(t).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+/** The hero speaks in the day's actual reading — movement, today's work, the
+ *  biggest rival, freshness — every line clickable to its evidence. Falls
+ *  back to the old run-summary sentence when rank data hasn't arrived. */
+function HeroStory({ hero, run, onNavigate }: {
+  hero: SeoHero | null; run: SeoRun | null; onNavigate: (id: string) => void;
+}) {
+  if (!hero || (!hero.movement && !hero.rank_share)) return <Story run={run} />;
+  const m = hero.movement;
+  const worst = m?.worst ?? null;
+  return (
+    <div className="seo-story seo-story--live">
+      {m && (
+        <p>
+          {m.up > 0 && <strong className="seo-brief__good">▲ {m.up} climbed</strong>}
+          {m.up > 0 && (m.down > 0 || m.dropouts > 0) && " · "}
+          {m.down > 0 && <strong className="seo-brief__bad">▼ {m.down} fell</strong>}
+          {m.down > 0 && m.dropouts > 0 && " · "}
+          {m.dropouts > 0 && <strong className="seo-brief__bad">{m.dropouts} dropped out</strong>}
+          {m.up === 0 && m.down === 0 && m.dropouts === 0 && <strong>Ranks steady this week</strong>}
+          {worst && (
+            <> — <button type="button" className="seo-story__link" onClick={() => onNavigate("rank-board")}>
+              &lsquo;{worst.query}&rsquo; #{worst.from}→#{worst.to}
+              {worst.leader ? ` (${worst.leader} ahead)` : ""}
+            </button></>
+          )}
+        </p>
+      )}
+      <p>
+        <button type="button" className="seo-story__link" onClick={() => onNavigate("insights")}>
+          {hero.today.immediate} immediate fix{hero.today.immediate === 1 ? "" : "es"}
+        </button>
+        {" · "}
+        <button type="button" className="seo-story__link" onClick={() => onNavigate("fanout")}>
+          {hero.today.fanout_gaps} content gap{hero.today.fanout_gaps === 1 ? "" : "s"} mapped
+        </button>
+        {hero.pressure && hero.pressure.above_us_on >= 3 && (
+          <> · <button type="button" className="seo-story__link" onClick={() => onNavigate("rank-board")}>
+            {hero.pressure.domain} ahead on {hero.pressure.above_us_on} queries
+          </button></>
+        )}
+      </p>
+      <p className="seo-story__meta">
+        Ranks checked {ago(hero.freshness.ranks_at)}
+        {" · "}deep audit {hero.freshness.audit_at ? ago(hero.freshness.audit_at) : "never"}
+        {hero.freshness.audit_stale && (
+          <> — <button type="button" className="seo-story__link"
+                       onClick={() => onNavigate("overview")}>re-run?</button></>
+        )}
+      </p>
+    </div>
+  );
 }
 
 /** The panel speaks first: what happened, in sentences a busy owner can read in 5 seconds. */
@@ -354,6 +418,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
   const [overview, setOverview] = useState<SeoOverview | null>(null);
   const [brand, setBrand] = useState<SeoBrand | null>(null);
   const [run, setRun] = useState<SeoRun | null>(null);
+  const [hero, setHero] = useState<SeoHero | null>(null);
   const [gsc, setGsc] = useState<SeoGscStatus | null>(null);
   const [siteReview, setSiteReview] = useState<SeoSiteReview | null>(null);
   const [siteBusy, setSiteBusy] = useState(false);
@@ -429,6 +494,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
       window.history.pushState({ seoBrand: id }, "", window.location.href);
       setBrand(detail.brand);
       setRun(detail.run);
+      setHero(detail.hero ?? null);
       setGsc(detail.gsc ?? null);
       setSiteReview(detail.site_review ?? null);
       setTool(null);
@@ -520,6 +586,7 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
       if (shownBrandId.current === id) {
         setBrand(detail.brand);
         setRun(detail.run);
+        setHero(detail.hero ?? null);
         setGsc(detail.gsc ?? null);
         setSiteReview(detail.site_review ?? null);
       }
@@ -828,8 +895,9 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
                   vitals={vitalsDoc}
                   pool={poolDoc}
                   healthFindings={siteReview ? siteReview.issues.length : null}
+                  hero={hero}
                 >
-                  <Story run={run} />
+                  <HeroStory hero={hero} run={run} onNavigate={navigateToSection} />
                 </BrandHero>
 
                 {run && <DegradedNotes notes={run.degraded} domain={brand.domain} />}

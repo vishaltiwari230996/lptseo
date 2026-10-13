@@ -244,6 +244,7 @@ def brand_detail(brand_id: str, user=Depends(get_current_user)):
     return {
         "brand": brand,
         "run": run,
+        "hero": seo_brief.hero(brand),
         "run_job": seo_jobs.status("run", brand_id),
         "gsc": {"connected": bool(conn), "property": (conn or {}).get("property"),
                 "needs_reconnect": bool((conn or {}).get("last_error")),

@@ -2089,10 +2089,22 @@ export interface SeoPlanItem {
   detail: string;
 }
 
+export interface SeoHero {
+  movement: { up: number; down: number; dropouts: number;
+              worst: { query: string; from: number | null; to: number | null;
+                       leader: string | null; leader_position: number | null } | null } | null;
+  today: { immediate: number; fanout_gaps: number };
+  pressure: { domain: string; above_us_on: number } | null;
+  rank_share: { tracked: number; top3: number; page1: number } | null;
+  traffic: { clicks_28d: number; clicks_prev_28d: number } | null;
+  freshness: { ranks_at: string | null; audit_at: string | null; audit_stale: boolean };
+}
+
 export const seoBrandDetail = (id: string, opts?: RequestOptions) =>
   getJson<{
     brand: SeoBrand;
     run: SeoRun | null;
+    hero?: SeoHero | null;
     /** The background "Refresh data" job, when one is or was running. */
     run_job?: DeepJob | null;
     gsc?: SeoGscStatus;

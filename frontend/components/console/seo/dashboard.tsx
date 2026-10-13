@@ -62,37 +62,65 @@ function computeHealthScore(
 }
 
 export function BrandHero({
-  sitemap, vitals, pool, healthFindings, children,
-}: DashboardTilesProps & { children: ReactNode }) {
+  sitemap, vitals, pool, healthFindings, hero, children,
+}: DashboardTilesProps & { hero?: import("@/lib/api").SeoHero | null; children: ReactNode }) {
   const score = computeHealthScore(sitemap, vitals, pool, healthFindings);
-  const pct = pool && pool.totals.keywords > 0
-    ? Math.round(((pool.bands.top3 + pool.bands.page1) / pool.totals.keywords) * 100)
+  // The naked "7" explained on hover — what fed the composite.
+  const healthWhy = [
+    sitemap ? `Sitemap ${sitemap.score}/100` : "Sitemap: not audited",
+    vitals?.origin_vitals?.mobile?.assessment
+      ? `CWV mobile: ${vitals.origin_vitals.mobile.assessment}` : "CWV: no field data",
+    healthFindings != null ? `${healthFindings} review finding(s)` : "Site review: not run",
+  ].join(" · ");
+
+  // ONE truth on the right, by best available source: real GSC clicks when
+  // connected; otherwise the rank tracker's page-1 share. Never the GSC-pool
+  // ring next to a rank-tracker sentence — the old panel showed "58 of 64 on
+  // page 1" beside "0% visible" and both were technically right.
+  const share = hero?.rank_share ?? null;
+  const clicks = hero?.traffic ?? null;
+  const sharePct = share && share.tracked > 0
+    ? Math.round((share.page1 / share.tracked) * 100) : null;
+  const clickDelta = clicks && clicks.clicks_prev_28d
+    ? Math.round(((clicks.clicks_28d - clicks.clicks_prev_28d) / clicks.clicks_prev_28d) * 100)
     : null;
 
   return (
     <div className="seo-hero">
-      <RadialGauge
-        value={score}
-        label="Site health"
-        size={132}
-        strokeWidth={11}
-      />
+      <span title={healthWhy}>
+        <RadialGauge
+          value={score}
+          label="Site health"
+          size={132}
+          strokeWidth={11}
+        />
+      </span>
       <div className="seo-hero__body">
         {children}
-        {pool && pool.totals.keywords > 0 && (
+        {clicks ? (
+          <div className="seo-hero__visibility">
+            <span className="seo-hero__kpi">{clicks.clicks_28d.toLocaleString("en-US")}</span>
+            {clickDelta != null && (
+              <span className={`seo-viz__delta seo-viz__delta--${clickDelta >= 0 ? "up" : "down"}`}>
+                {clickDelta >= 0 ? "▲" : "▼"} {Math.abs(clickDelta)}%
+              </span>
+            )}
+            <span className="seo-hero__visibility-label">clicks · 28 days</span>
+          </div>
+        ) : share && sharePct != null ? (
           <div className="seo-hero__visibility">
             <Donut
               size={56} strokeWidth={7} showLegend={false}
-              centerValue={pct != null ? `${pct}%` : "—"}
+              centerValue={`${sharePct}%`}
               segments={[
-                { key: "top3", label: "Top 3", value: pool.bands.top3, tone: "good" },
-                { key: "page1", label: "Page 1", value: pool.bands.page1, tone: "mid" },
-                { key: "rest", label: "Elsewhere", value: pool.totals.keywords - pool.bands.top3 - pool.bands.page1, tone: "flat" },
+                { key: "top3", label: "Top 3", value: share.top3, tone: "good" },
+                { key: "page1", label: "Page 1", value: share.page1 - share.top3, tone: "mid" },
+                { key: "rest", label: "Elsewhere", value: share.tracked - share.page1, tone: "flat" },
               ]}
             />
-            <span className="seo-hero__visibility-label">visible on page 1</span>
+            <span className="seo-hero__visibility-label">of tracked queries on page 1</span>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

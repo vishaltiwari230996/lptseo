@@ -18,7 +18,7 @@ arriving at from the data:
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timezone
 
 from . import digests
 
@@ -185,4 +185,67 @@ def build(brand: dict) -> dict:
         "immediate": immediate[:MAX_LINES],
         "secondary": secondary[:MAX_LINES],
         "notes": notes,
+    }
+
+
+#: A deep audit older than this is stale enough to nudge about.
+AUDIT_STALE_DAYS = 7
+
+
+def hero(brand: dict) -> dict:
+    """The brand hero's data: movement since last week, today's work, the
+    biggest rival, data freshness, and the one honest share-of-page-1 number.
+    Pure local reads, assembled fresh per request — the hero must never show
+    two sources disagreeing about the same fact (the old panel put a
+    rank-tracker "58 of 64 on page 1" next to a GSC-pool "0% visible")."""
+    brand_id = brand["id"]
+    rank = digests.rank_digest(brand)
+    traffic = digests.traffic_digest(brand_id)
+    deep = digests.deep_digest(brand_id)
+
+    from . import fanout as fanout_mod  # local: fanout imports knowledge/jobs, no cycle back
+
+    gaps = 0
+    for q in fanout_mod.recent(brand_id):
+        doc = fanout_mod.latest(brand_id, q) or {}
+        gaps += int((doc.get("summary") or {}).get("gap") or 0)
+
+    daily = build(brand)
+
+    worst = ((rank or {}).get("movers_down") or [None])[0]
+    pressure = ((rank or {}).get("pressure") or [None])[0]
+
+    summary = (traffic or {}).get("summary") or {}
+    clicks = None
+    if summary.get("mode") == "search-console":
+        clicks = {"clicks_28d": summary.get("clicks_28d"),
+                  "clicks_prev_28d": summary.get("clicks_prev_28d")}
+
+    audit_at = (deep or {}).get("at")
+    audit_stale = False
+    if audit_at:
+        try:
+            age = datetime.now(timezone.utc).date() - date.fromisoformat(audit_at)
+            audit_stale = age.days > AUDIT_STALE_DAYS
+        except ValueError:
+            pass
+
+    return {
+        "movement": {
+            "up": len((rank or {}).get("movers_up") or []),
+            "down": len((rank or {}).get("movers_down") or []),
+            "dropouts": len((rank or {}).get("dropouts_7d") or []),
+            "worst": worst,  # {query, from, to, leader, leader_position} | None
+        } if rank else None,
+        "today": {"immediate": len(daily["immediate"]), "fanout_gaps": gaps},
+        "pressure": pressure,  # {domain, above_us_on} | None
+        "rank_share": {
+            "tracked": rank["tracked"], "top3": rank["top3"], "page1": rank["page1"],
+        } if rank else None,
+        "traffic": clicks,  # only in search-console mode — never a fake zero
+        "freshness": {
+            "ranks_at": (rank or {}).get("at"),
+            "audit_at": audit_at,
+            "audit_stale": audit_stale,
+        },
     }

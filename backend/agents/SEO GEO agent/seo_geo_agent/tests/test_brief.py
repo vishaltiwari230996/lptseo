@@ -97,3 +97,40 @@ def test_brief_is_honest_about_missing_sources(monkeypatch):
     assert doc["current_rank"] is None
     assert any("sweep" in n.lower() for n in doc["notes"])
     assert any("deep audit" in n.lower() for n in doc["notes"])
+
+
+def test_hero_assembles_movement_today_pressure_and_freshness(monkeypatch):
+    from seo_geo_agent import fanout
+
+    _seed(monkeypatch)
+    state.save(f"fanout-b-{fanout._qhash('t1')}",
+               {"query": "t1", "at": "2026-10-13T00:00:00",
+                "subqueries": [], "summary": {"covered": 1, "weak": 2, "gap": 4}, "notes": []})
+    state.save(f"fanout-b-{fanout._qhash('t2')}",
+               {"query": "t2", "at": "2026-10-13T00:00:00",
+                "subqueries": [], "summary": {"covered": 0, "weak": 0, "gap": 3}, "notes": []})
+    state.save("fanouts-b", {"queries": ["t1", "t2"]})
+    try:
+        h = brief.hero(BRAND)
+        assert h["movement"]["down"] == 1 and h["movement"]["dropouts"] == 1
+        assert h["movement"]["worst"]["query"] == "clat coaching"
+        assert h["movement"]["worst"]["leader"] == "rival.com"
+        assert h["today"]["fanout_gaps"] == 7           # 4 + 3, summed across topics
+        assert h["today"]["immediate"] >= 1             # the brief's immediate queue
+        assert h["pressure"]["domain"] == "rival.com"
+        assert h["rank_share"] == {"tracked": 3, "top3": 1, "page1": 2}
+        assert h["traffic"]["clicks_28d"] == 800        # search-console mode
+        assert h["freshness"]["audit_stale"] is True    # DEEP is dated 2026-10-01
+    finally:
+        _clean()
+        for q in ("t1", "t2"):
+            state.delete(f"fanout-b-{fanout._qhash(q)}")
+        state.delete("fanouts-b")
+
+
+def test_hero_is_honest_with_no_data(monkeypatch):
+    monkeypatch.setattr(digests.rank_tracker, "annotate_rows", lambda brand: [])
+    h = brief.hero(BRAND)
+    assert h["movement"] is None and h["rank_share"] is None
+    assert h["traffic"] is None                          # no fake zeros
+    assert h["today"]["fanout_gaps"] == 0
