@@ -1294,3 +1294,48 @@ a.seo-pages__path:hover { color: var(--green-500); }
 .seo-herostory { flex: 1; }
 .seo-herogrid { grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); }
 .seo-kpi__value { max-width: 100%; }
+
+/* "Do this today" — the hero's single decision, one press-able row. */
+.seo-donow {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: left;
+  background: color-mix(in srgb, var(--brand) 9%, var(--surface-card));
+  border: 1px solid color-mix(in srgb, var(--brand) 38%, transparent);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 160ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.seo-donow:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 26px -14px color-mix(in srgb, var(--brand) 45%, #00000055);
+}
+.seo-donow__label {
+  flex: none;
+  font: 650 10.5px/1.2 var(--font-sans);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--brand);
+}
+.seo-donow__text {
+  flex: 1; min-width: 0;
+  font: 600 14px/1.45 var(--font-sans);
+  color: var(--text-primary);
+}
+.seo-donow__go { flex: none; color: var(--brand); transform: rotate(180deg); display: inline-flex; }
+
+/* Exam-calendar countdown — amber: a date, not an alarm. */
+.seo-eventnudge {
+  display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 13px;
+  text-align: left;
+  font: 500 12.5px/1.5 var(--font-sans);
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--amber-500) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber-500) 40%, transparent);
+  border-radius: 999px;
+  cursor: pointer;
+  justify-self: start;
+}
+.seo-eventnudge svg { color: var(--amber-500); }

@@ -31,7 +31,8 @@ RUN = {"at": "2026-10-07", "degraded": [],
        "summary": {"mode": "search-console", "clicks_28d": 800, "clicks_prev_28d": 1000,
                    "impressions_28d": 50000, "avg_position": 9.1, "est_potential_clicks": 300},
        "todos": [
-           {"id": "t1", "kind": "ctr_gap", "action": "Rewrite the title for 'clat 2027'", "why": "w",
+           {"id": "t1", "kind": "ctr_gap", "query": "clat 2027", "page": "https://x.com/clat-2027",
+            "action": "Rewrite the title for 'clat 2027'", "why": "w",
             "est_monthly_clicks": 90, "position": 3.0, "status": "todo"},
            {"id": "t2", "kind": "striking", "action": "Refresh the CLAT syllabus page", "why": "w",
             "est_monthly_clicks": 40, "position": 7.0, "status": "todo"},
@@ -134,3 +135,73 @@ def test_hero_is_honest_with_no_data(monkeypatch):
     assert h["movement"] is None and h["rank_share"] is None
     assert h["traffic"] is None                          # no fake zeros
     assert h["today"]["fanout_gaps"] == 0
+
+
+def test_hero_next_action_is_the_top_immediate_line(monkeypatch):
+    _seed(monkeypatch)
+    try:
+        h = brief.hero(BRAND)
+        assert h["next_action"]["text"].startswith("Template fault") or "Rewrite" in h["next_action"]["text"]
+        assert h["next_action"]["link"] in ("landing", "traffic", "rank-board")
+    finally:
+        _clean()
+
+
+def test_fix_outcomes_judge_only_after_the_waiting_period(monkeypatch):
+    import time as _time
+    from seo_geo_agent import insights as ins
+
+    _seed(monkeypatch)
+    now = int(_time.time())
+    state.save("fixlog-b", {"entries": [
+        {"id": "a", "query": "clat coaching", "position_at_done": 9,
+         "done_at": now - 10 * 86400},                       # judged: now #4 → improved
+        {"id": "b", "query": "judiciary prep", "position_at_done": 2,
+         "done_at": now - 8 * 86400},                        # judged: still #2 → flat
+        {"id": "c", "query": "clat coaching", "position_at_done": 9,
+         "done_at": now - 2 * 86400},                        # too fresh → pending... same id risk: use distinct
+    ]})
+    try:
+        h = brief.hero(BRAND)
+        f = h["fixes"]
+        assert f["improved"] == 1 and f["flat"] == 1 and f["pending"] == 1
+        assert f["latest_win"] == {"query": "clat coaching", "from": 9, "to": 4}
+    finally:
+        _clean()
+        state.delete("fixlog-b")
+
+
+def test_marking_done_writes_the_fix_log(monkeypatch):
+    from seo_geo_agent import insights as ins
+
+    state.save("run-b", RUN)
+    try:
+        ins.set_todo_status("b", "t1", "done")
+        log = state.load("fixlog-b")["entries"]
+        assert log[0]["query"] == "clat 2027" and log[0]["id"] == "t1"
+        assert log[0]["position_at_done"] == 3.0
+        ins.set_todo_status("b", "t1", "todo")              # un-done does not duplicate
+        assert len(state.load("fixlog-b")["entries"]) == 1
+    finally:
+        state.delete("run-b")
+        state.delete("todos-b")
+        state.delete("fixlog-b")
+
+
+def test_hero_event_countdown(monkeypatch):
+    import datetime as dt
+
+    _seed(monkeypatch)
+    soon = (dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=18)).isoformat()
+    far = (dt.datetime.now(dt.timezone.utc).date() + dt.timedelta(days=120)).isoformat()
+    brand = {**BRAND, "events": [
+        {"name": "CLAT 2027 registration", "date": soon, "query": "clat coaching"},
+        {"name": "Too far away", "date": far, "query": ""},
+    ]}
+    try:
+        h = brief.hero(brand)
+        ev = h["event"]
+        assert ev["name"] == "CLAT 2027 registration" and ev["days_left"] == 18
+        assert ev["position"] == 4                           # looked up from rank rows
+    finally:
+        _clean()

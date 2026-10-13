@@ -630,3 +630,24 @@ def set_todo_status(brand_id: str, item_id: str, status: str) -> None:
     doc = state.load(f"todos-{brand_id}") or {"status": {}}
     doc.setdefault("status", {})[item_id] = status
     state.save(f"todos-{brand_id}", doc)
+    # The closed loop's first half: marking a fix done snapshots WHAT was
+    # fixed and WHERE it stood, so the hero can later answer "did my fixes
+    # work?" instead of a done-flag vanishing into a void. Transactional —
+    # two people finishing todos at once must not lose each other's entries.
+    if status != "done":
+        return
+    run = state.load(f"run-{brand_id}") or {}
+    todo = next((t for t in run.get("todos", []) if t.get("id") == item_id), None)
+    if not todo or not todo.get("query"):
+        return
+    import time as _time
+    entry = {"id": item_id, "query": todo["query"], "page": todo.get("page", ""),
+             "action": todo.get("action", ""), "kind": todo.get("kind", ""),
+             "position_at_done": todo.get("position") or None,
+             "done_at": int(_time.time())}
+
+    def change(current: dict) -> tuple[dict, None]:
+        entries = [e for e in current.get("entries", []) if e.get("id") != item_id]
+        return {"entries": ([entry] + entries)[:50]}, None
+
+    state.mutate(f"fixlog-{brand_id}", change)

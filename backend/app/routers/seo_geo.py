@@ -91,6 +91,16 @@ class QueriesIn(BaseModel):
     queries: list[str]
 
 
+class EventIn(BaseModel):
+    name: str
+    date: str  # YYYY-MM-DD
+    query: str = ""
+
+
+class EventsIn(BaseModel):
+    events: list[EventIn]
+
+
 class KeywordIn(BaseModel):
     keyword: str
 
@@ -909,6 +919,30 @@ def get_brief(brand_id: str, user=Depends(get_current_user)):
     reads over already-persisted digests, so there is nothing to cache and no
     staleness to explain."""
     return {"brief": seo_brief.build(_brand_or_404(brand_id))}
+
+
+@router.put("/seo-geo/brands/{brand_id}/events")
+def set_brand_events(brand_id: str, payload: EventsIn, user=Depends(require_creator),
+                     act: Activity = trail.records("brand_events", "Updated the exam calendar", unit=CHANGE)):
+    """The brand's exam calendar (registration windows, exam dates). Feeds the
+    hero's countdown nudge; whole-list replace, creator-only like every other
+    brand mutation."""
+    from datetime import date as _date
+
+    brand = _brand_or_404(brand_id)
+    _for(act, brand)
+    events = []
+    for ev in payload.events[:12]:
+        name = ev.name.strip()[:80]
+        try:
+            _date.fromisoformat(ev.date)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Bad date for “{name}”: use YYYY-MM-DD") from exc
+        if name:
+            events.append({"name": name, "date": ev.date, "query": ev.query.strip()[:120]})
+    insights.upsert_brand({**brand, "events": events})
+    act.note(f"Exam calendar: {len(events)} event(s)")
+    return {"events": events}
 
 
 @router.get("/seo-geo/fanout/{brand_id}")

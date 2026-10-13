@@ -11,8 +11,8 @@
 
 import { Fragment, useCallback, useEffect, useState } from "react";
 import {
-  seoAddCustomQuery, seoRankBoard, seoRemoveCustomQuery,
-  type SeoRankBoardDoc, type SeoRankBoardEntry,
+  seoAddCustomQuery, seoRankBoard, seoRemoveCustomQuery, seoSetBrandEvents,
+  type SeoBrandEvent, type SeoRankBoardDoc, type SeoRankBoardEntry,
 } from "@/lib/api";
 import type { ToastFn } from "@/components/console/ConsoleApp";
 import { describeFailure } from "@/lib/load";
@@ -76,8 +76,83 @@ function Row({ r, isCreator, onRemove }: {
   );
 }
 
-export function RankBoardView({ brandId, isCreator, onToast }: {
+/* The exam calendar — the dates this business actually revolves around
+ * (registration windows, exam days). Each feeds the hero's countdown nudge
+ * with where we rank for its query as the day approaches. */
+function EventsCard({ brandId, events, isCreator, onSaved, onToast }: {
+  brandId: string; events: SeoBrandEvent[]; isCreator: boolean;
+  onSaved: (events: SeoBrandEvent[]) => void; onToast: ToastFn;
+}) {
+  const [name, setName] = useState("");
+  const [when, setWhen] = useState("");
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save(next: SeoBrandEvent[]) {
+    setBusy(true);
+    try {
+      const r = await seoSetBrandEvents(brandId, next);
+      onSaved(r.events);
+      setName(""); setWhen(""); setQuery("");
+    } catch (exc) {
+      onToast(describeFailure(exc, "Could not save the calendar"), "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const daysLeft = (d: string) =>
+    Math.ceil((new Date(`${d}T00:00:00Z`).getTime() - Date.now()) / 86_400_000);
+
+  if (!isCreator && events.length === 0) return null;
+  return (
+    <div className="mr-section">
+      <h3 className="mr-section__title">Exam calendar</h3>
+      <p className="seo-note" style={{ maxWidth: "42rem" }}>
+        The dates this market moves around. The nearest one shows on the brand hero as a
+        countdown, with where we rank for its query.
+      </p>
+      {events.length > 0 && (
+        <div className="seo-cluster__kws">
+          {events.map((ev) => {
+            const d = daysLeft(ev.date);
+            return (
+              <span key={ev.name + ev.date}
+                    className={`seo-chip seo-fanout__chip${d >= 0 && d <= 45 ? " seo-chip--warn" : ""}`}>
+                <span>{ev.name} · {ev.date}{d >= 0 ? ` (${d}d)` : " (past)"}
+                  {ev.query ? ` · “${ev.query}”` : ""}</span>
+                {isCreator && (
+                  <button type="button" className="seo-chip__x" aria-label={`Remove ${ev.name}`}
+                          onClick={() => void save(events.filter((x) => x !== ev))}>×</button>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      {isCreator && (
+        <form className="seo-poolbar" onSubmit={(e) => {
+          e.preventDefault();
+          if (name.trim() && when) void save([...events, { name: name.trim(), date: when, query: query.trim() }]);
+        }}>
+          <input className="seo-input" value={name} placeholder="Event — e.g. CLAT 2027 registration opens"
+                 onChange={(e) => setName(e.target.value)} aria-label="Event name" />
+          <input className="seo-input" type="date" value={when}
+                 onChange={(e) => setWhen(e.target.value)} aria-label="Event date" />
+          <input className="seo-input" value={query} placeholder="Query to watch (optional)"
+                 onChange={(e) => setQuery(e.target.value)} aria-label="Query to watch" />
+          <button className="seo-btn seo-btn--primary" type="submit" disabled={busy || !name.trim() || !when}>
+            <Icon name="plus" size={13} /> Add
+          </button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+export function RankBoardView({ brandId, isCreator, onToast, events = [], onEventsSaved }: {
   brandId: string; isCreator: boolean; onToast: ToastFn;
+  events?: SeoBrandEvent[]; onEventsSaved?: (events: SeoBrandEvent[]) => void;
 }) {
   const [doc, setDoc] = useState<SeoRankBoardDoc | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -125,6 +200,9 @@ export function RankBoardView({ brandId, isCreator, onToast }: {
   if (!doc) return <p className="seo-empty">Could not load the rank board — try again.</p>;
 
   return (
+    <>
+    <EventsCard brandId={brandId} events={events} isCreator={isCreator}
+                onSaved={(ev) => onEventsSaved?.(ev)} onToast={onToast} />
     <div className="mr-section">
       <div className="seo-lab__head">
         <h3 className="mr-section__title">
@@ -173,5 +251,6 @@ export function RankBoardView({ brandId, isCreator, onToast }: {
         </p>
       )}
     </div>
+    </>
   );
 }

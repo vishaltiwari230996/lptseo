@@ -1942,6 +1942,7 @@ export const mrLeadsPdfUrl = (month?: string) =>
 /* ------------------------------ SEO agent (a2) ---------------------------- */
 
 export interface SeoBrand {
+  events?: SeoBrandEvent[];
   id: string;
   name: string;
   domain: string;
@@ -2089,7 +2090,18 @@ export interface SeoPlanItem {
   detail: string;
 }
 
+export interface SeoBrandEvent { name: string; date: string; query: string }
+
 export interface SeoHero {
+  /** THE one thing to do today — the brief's top line. */
+  next_action: { text: string; link: string } | null;
+  /** Did the fixes marked done actually move? Judged after 7 days. */
+  fixes: { judged: number; improved: number; worse: number; flat: number;
+           pending: number;
+           latest_win: { query: string; from: number; to: number } | null } | null;
+  /** Nearest exam-calendar event inside 45 days. */
+  event: { name: string; date: string; days_left: number;
+           query: string | null; position: number | null } | null;
   movement: { up: number; down: number; dropouts: number;
               worst: { query: string; from: number | null; to: number | null;
                        leader: string | null; leader_position: number | null } | null } | null;
@@ -2661,6 +2673,9 @@ export interface SeoRankBoardDoc {
   last_sweep: { at: string; checked: number; ranked: number; errors: number;
                 blocked: string | null; notes: string[] } | null;
 }
+
+export const seoSetBrandEvents = (brandId: string, events: SeoBrandEvent[]) =>
+  putJson<{ events: SeoBrandEvent[] }>(`/api/seo-geo/brands/${brandId}/events`, { events });
 
 export const seoRankBoard = (id: string, opts?: RequestOptions) =>
   getJson<SeoRankBoardDoc>(`/api/seo-geo/rank-board/${id}`, opts);

@@ -210,8 +210,17 @@ function HeroStory({ hero, run, onNavigate }: {
   const worst = m?.worst ?? null;
   const moved = !!m && (m.up > 0 || m.down > 0 || m.dropouts > 0);
 
+  const fx = hero.fixes;
   return (
     <div className="seo-herostory">
+      {hero.next_action && (
+        <button type="button" className="seo-donow"
+                onClick={() => onNavigate(hero.next_action!.link)}>
+          <span className="seo-donow__label">Do this today</span>
+          <span className="seo-donow__text">{hero.next_action.text}</span>
+          <span className="seo-donow__go"><Icon name="arrow-left" size={14} /></span>
+        </button>
+      )}
       <div className="seo-herogrid">
         {m && (
           <HeroCell
@@ -243,6 +252,21 @@ function HeroStory({ hero, run, onNavigate }: {
           sub="content gaps mapped in Fan-out"
           onClick={() => onNavigate("fanout")}
         />
+        {fx && (fx.judged > 0 || fx.pending > 0) && (
+          <HeroCell
+            label="Your fixes"
+            tone={fx.judged > 0 ? (fx.improved >= fx.worse ? "good" : "bad") : undefined}
+            value={fx.judged > 0
+              ? <>{fx.improved}/{fx.judged} <span className="seo-kpi__updown seo-kpi__updown--up">▲</span></>
+              : `${fx.pending} pending`}
+            sub={fx.judged > 0
+              ? (fx.latest_win
+                  ? `'${fx.latest_win.query}' #${fx.latest_win.from}→#${fx.latest_win.to} after your fix`
+                  : `moved up after being fixed${fx.pending ? ` · ${fx.pending} still settling` : ""}`)
+              : "fixes judged 7 days after done"}
+            onClick={() => onNavigate("insights")}
+          />
+        )}
         {hero.pressure && (
           <HeroCell
             label="Biggest rival"
@@ -253,6 +277,16 @@ function HeroStory({ hero, run, onNavigate }: {
           />
         )}
       </div>
+      {hero.event && (
+        <button type="button" className="seo-eventnudge" onClick={() => onNavigate("rank-board")}>
+          <Icon name="alert-triangle" size={13} />
+          <strong>{hero.event.name}</strong> in {hero.event.days_left} day{hero.event.days_left === 1 ? "" : "s"}
+          {hero.event.query && (
+            <> — &lsquo;{hero.event.query}&rsquo; {hero.event.position != null
+              ? <>is at <strong>#{hero.event.position}</strong></> : "is not in the top 20"}</>
+          )}
+        </button>
+      )}
       <p className="seo-story__meta">
         Ranks checked {ago(hero.freshness.ranks_at)} · deep audit{" "}
         {hero.freshness.audit_at ? ago(hero.freshness.audit_at) : "never"}
@@ -1024,7 +1058,9 @@ export function SeoAgent({ onToast, onBack }: { onToast: ToastFn; onBack: () => 
 
               {workspace === "daily" && dailySection === "rank-board" && (
                 <div className="seo-section">
-                  <RankBoardView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast} />
+                  <RankBoardView brandId={brand.id} isCreator={!!user?.is_creator} onToast={onToast}
+                                 events={brand.events ?? []}
+                                 onEventsSaved={(ev) => setBrand({ ...brand, events: ev })} />
                 </div>
               )}
 

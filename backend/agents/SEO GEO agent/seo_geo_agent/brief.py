@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
-from . import digests
+from . import digests, state
 
 MAX_LINES = 8
 
@@ -190,6 +190,86 @@ def build(brand: dict) -> dict:
 
 #: A deep audit older than this is stale enough to nudge about.
 AUDIT_STALE_DAYS = 7
+#: A done fix is judged only after the SERPs had time to react.
+FIX_VERDICT_DAYS = 7
+#: Calendar events surface on the hero this far ahead.
+EVENT_HORIZON_DAYS = 45
+
+
+def _fix_outcomes(brand: dict, rank: dict | None) -> dict | None:
+    """Did the fixes marked done actually move? Deterministic: each logged
+    fix ≥7 days old is compared against today's position for its query —
+    rank rows first, the keyword pool as fallback. No data = pending, never
+    a guess."""
+    log = (state.load(f"fixlog-{brand['id']}") or {}).get("entries", [])
+    if not log:
+        return None
+    from . import keyword_pool, rank_tracker
+
+    now = int(datetime.now(timezone.utc).timestamp())
+    positions: dict[str, float] = {}
+    for row in rank_tracker.annotate_rows(brand):
+        if row.get("position"):
+            positions[rank_tracker._norm(row["query"])] = row["position"]
+    for row in (keyword_pool.latest(brand["id"]) or {}).get("keywords", []):
+        key = rank_tracker._norm(row.get("keyword", ""))
+        if key not in positions and (row.get("position") or 0) > 0:
+            positions[key] = row["position"]
+
+    improved = worse = flat = pending = 0
+    latest_win = None
+    for e in log[:20]:
+        before = e.get("position_at_done")
+        age_days = (now - int(e.get("done_at") or now)) / 86400
+        if age_days < FIX_VERDICT_DAYS:
+            pending += 1
+            continue
+        current = positions.get(rank_tracker._norm(e.get("query", "")))
+        if not before or current is None:
+            pending += 1
+            continue
+        if current < before - 0.5:
+            improved += 1
+            if latest_win is None:
+                latest_win = {"query": e["query"], "from": round(before), "to": round(current)}
+        elif current > before + 0.5:
+            worse += 1
+        else:
+            flat += 1
+    judged = improved + worse + flat
+    if judged == 0 and pending == 0:
+        return None
+    return {"judged": judged, "improved": improved, "worse": worse,
+            "flat": flat, "pending": pending, "latest_win": latest_win}
+
+
+def _next_event(brand: dict, rank: dict | None) -> dict | None:
+    """The nearest configured exam-calendar event inside the horizon, with
+    where we rank for its query today (when tracked)."""
+    today = datetime.now(timezone.utc).date()
+    best = None
+    for ev in brand.get("events") or []:
+        try:
+            when = date.fromisoformat(str(ev.get("date", "")))
+        except ValueError:
+            continue
+        days = (when - today).days
+        if 0 <= days <= EVENT_HORIZON_DAYS and (best is None or days < best[0]):
+            best = (days, ev)
+    if not best:
+        return None
+    days, ev = best
+    position = None
+    query = (ev.get("query") or "").strip()
+    if query and rank:
+        from . import rank_tracker
+        key = rank_tracker._norm(query)
+        for row in rank_tracker.annotate_rows(brand):
+            if rank_tracker._norm(row["query"]) == key:
+                position = row.get("position")
+                break
+    return {"name": ev.get("name", ""), "date": str(ev.get("date")), "days_left": days,
+            "query": query or None, "position": position}
 
 
 def hero(brand: dict) -> dict:
@@ -230,7 +310,12 @@ def hero(brand: dict) -> dict:
         except ValueError:
             pass
 
+    next_action = (daily["immediate"] or daily["secondary"] or [None])[0]
+
     return {
+        "next_action": next_action,  # {text, link} — THE one thing to do today
+        "fixes": _fix_outcomes(brand, rank),
+        "event": _next_event(brand, rank),
         "movement": {
             "up": len((rank or {}).get("movers_up") or []),
             "down": len((rank or {}).get("movers_down") or []),
